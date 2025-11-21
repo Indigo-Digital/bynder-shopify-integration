@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=file:./dev.sqlite
+      - SHOPIFY_API_KEY=${SHOPIFY_API_KEY}
+      - SHOPIFY_API_SECRET=${SHOPIFY_API_SECRET}
+      - SHOPIFY_APP_URL=${SHOPIFY_APP_URL}
+      - BYNDER_CLIENT_ID=${BYNDER_CLIENT_ID}
+      - BYNDER_CLIENT_SECRET=${BYNDER_CLIENT_SECRET}
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: pnpm run dev
+
+  # PostgreSQL for production-like testing
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=bynder
+      - POSTGRES_PASSWORD=bynder
+      - POSTGRES_DB=bynder_shopify
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+

@@ -1,0 +1,10 @@
+# Learn more about configuring your extension at https://shopify.dev/docs/api/admin-extensions/configuration
+
+api_version = "2026-01"
+name = "bynder-asset-field"
+type = "admin_action"
+
+[build]
+command = ""
+watch = []
+

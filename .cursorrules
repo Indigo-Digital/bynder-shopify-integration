@@ -1,0 +1,103 @@
+# Bynder-Shopify Integration App - Cursor Rules
+
+## Tech Stack
+
+- **Framework**: React Router v7 with file-based routing
+- **Language**: TypeScript (strict mode enabled)
+- **Package Manager**: pnpm (always use pnpm, never npm)
+- **Linting/Formatting**: Biome (replaced ESLint/Prettier)
+- **Database**: Prisma with SQLite (dev) / PostgreSQL (production)
+- **Shopify API**: 2026-01
+- **Bynder SDK**: @bynder/bynder-js-sdk
+
+## Project Structure
+
+- `app/routes/` - React Router v7 file-based routes
+  - `app.*.tsx` - App pages (authenticated)
+  - `api.*.tsx` - API endpoints
+- `app/lib/` - Shared library code
+  - `bynder/` - Bynder SDK wrappers
+  - `shopify/` - Shopify API utilities
+  - `sync/` - Sync logic
+- `app/components/` - React components
+- `extensions/` - Shopify app extensions
+- `prisma/` - Database schema and migrations
+
+## Code Style
+
+- Use Biome for linting and formatting: `pnpm lint` and `pnpm format`
+- TypeScript strict mode is enabled
+- Use file-based routing conventions for React Router v7
+- Prefer async/await over promises
+- Use Prisma for all database operations
+
+## Key Conventions
+
+### Metafields
+- **Namespace**: `$app:bynder` (reserved namespace)
+- Always use reserved namespace to prevent conflicts
+
+### File Naming
+- Pattern: `campaigns/{tag}/{originalFilename}`
+- Sanitize tags for file paths
+- Handle duplicate filenames
+
+### Bynder Integration
+- OAuth2 for user actions (manual picker)
+- Client credentials for background jobs
+- Store tokens in database per shop
+- Support configurable sync tags (comma-separated)
+
+### Shopify Integration
+- All assets go to Shopify Files (never product images)
+- Store Bynder metadata in metafields for traceability
+- Use GraphQL Admin API (2026-01)
+
+## Database
+
+- Use Prisma migrations: `pnpm prisma migrate dev`
+- Models: Shop, SyncedAsset, WebhookSubscription, SyncJob
+- Always use transactions for multi-step operations
+
+## Environment Variables
+
+- `BYNDER_CLIENT_ID` - Bynder OAuth client ID
+- `BYNDER_CLIENT_SECRET` - Bynder OAuth client secret
+- `SHOPIFY_API_KEY` - Shopify app API key
+- `SHOPIFY_API_SECRET` - Shopify app API secret
+- `SHOPIFY_APP_URL` - App URL for OAuth redirects
+
+## Testing
+
+- Write unit tests for core sync logic
+- Integration tests for API calls
+- E2E tests for full workflows
+
+## Deployment
+
+- Prototype: Fly.io
+- Production: GCP Cloud Run
+- Use Docker for containerization
+- Secrets: GCP Secret Manager (production)
+
+## Pre-Commit Requirements
+
+**CRITICAL: Before any commit, ALL of the following must pass:**
+
+1. **Tests must pass**: Run `pnpm test` - all tests must pass
+2. **Typecheck must pass**: Run `pnpm typecheck` - no type errors allowed
+3. **Linting must pass**: Run `pnpm lint` - no linting errors allowed
+
+**Never commit code that fails any of these checks. Fix all issues before committing.**
+
+## Best Practices
+
+1. Always use pnpm, never npm
+2. Use Biome for linting/formatting
+3. Store Bynder metadata in `$app:bynder` namespace
+4. Handle errors gracefully with user-friendly messages
+5. Implement retry logic for API failures
+6. Use pagination for large data sets
+7. Cache Bynder asset metadata when possible
+8. Rate limit handling for both APIs
+

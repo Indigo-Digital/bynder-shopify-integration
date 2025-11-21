@@ -1,0 +1,10 @@
+# Learn more about configuring your extension at https://shopify.dev/docs/api/checkout-ui-extensions/configuration
+
+api_version = "2026-01"
+name = "bynder-asset-block"
+type = "theme_editor_extension"
+
+[build]
+command = ""
+watch = []
+

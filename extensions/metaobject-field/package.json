@@ -1,0 +1,8 @@
+{
+	"name": "bynder-asset-field",
+	"version": "1.0.0",
+	"private": true,
+	"dependencies": {
+		"@shopify/ui-extensions-react": "^2025.7.1"
+	}
+}

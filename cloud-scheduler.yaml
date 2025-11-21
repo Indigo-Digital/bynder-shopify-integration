@@ -1,0 +1,19 @@
+# GCP Cloud Scheduler configuration for auto-sync jobs
+# Deploy using: gcloud scheduler jobs create http bynder-sync-job --config-file=cloud-scheduler.yaml
+
+# Example Cloud Scheduler job configuration
+# This would be created via gcloud CLI:
+#
+# gcloud scheduler jobs create http bynder-sync-job \
+#   --schedule="*/30 * * * *" \
+#   --uri="https://bynder-shopify-integration-XXXXX.run.app/api/sync" \
+#   --http-method=POST \
+#   --oidc-service-account-email=bynder-sync@PROJECT_ID.iam.gserviceaccount.com \
+#   --oidc-token-audience=https://bynder-shopify-integration-XXXXX.run.app \
+#   --time-zone="UTC" \
+#   --description="Auto-sync Bynder assets to Shopify Files"
+
+# Schedule: Every 30 minutes
+# Endpoint: POST /api/sync
+# Authentication: OIDC service account
+

@@ -1,0 +1,76 @@
+# GCP Cloud Run configuration
+# This file documents the Cloud Run deployment configuration
+# Actual deployment is done via gcloud CLI or Cloud Console
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: bynder-shopify-integration
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/execution-environment: gen2
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - image: gcr.io/PROJECT_ID/bynder-shopify-integration:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: database-url
+                  key: url
+            - name: SHOPIFY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shopify-credentials
+                  key: api-key
+            - name: SHOPIFY_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: shopify-credentials
+                  key: api-secret
+            - name: BYNDER_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bynder-credentials
+                  key: client-id
+            - name: BYNDER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bynder-credentials
+                  key: client-secret
+          resources:
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+            requests:
+              cpu: "1"
+              memory: "1Gi"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+

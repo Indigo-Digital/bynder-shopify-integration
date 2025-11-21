@@ -1,0 +1,43 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.3.6/schema.json",
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"a11y": {
+				"noStaticElementInteractions": {
+					"level": "off"
+				}
+			}
+		}
+	},
+	"formatter": {
+		"enabled": true,
+		"formatWithErrors": false
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double",
+			"semicolons": "always",
+			"trailingCommas": "es5"
+		}
+	},
+	"files": {
+		"ignoreUnknown": false,
+		"includes": [
+			"**/*.ts",
+			"**/*.tsx",
+			"**/*.js",
+			"**/*.jsx",
+			"**/*.json",
+			"!!**/node_modules",
+			"!!**/.react-router",
+			"!!**/build",
+			"!!**/dist",
+			"!!**/*.sqlite",
+			"!!**/*.sqlite-journal",
+			"!!**/prisma/migrations",
+			"!!**/extensions/**/node_modules"
+		]
+	}
+}

@@ -95,7 +95,7 @@ export default function FilesPage() {
 							</tr>
 						</thead>
 						<tbody>
-							{syncedAssets.map((asset) => (
+							{syncedAssets.map((asset: (typeof syncedAssets)[number]) => (
 								<tr key={asset.id}>
 									<td>{asset.bynderAssetId}</td>
 									<td>{asset.syncType}</td>

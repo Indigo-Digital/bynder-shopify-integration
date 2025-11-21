@@ -44,8 +44,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			const tags = body.tags || body.asset?.tags || [];
 			const syncTags = shopConfig.syncTags
 				.split(",")
-				.map((tag) => tag.trim())
-				.filter((tag) => tag.length > 0);
+				.map((tag: string) => tag.trim())
+				.filter((tag: string) => tag.length > 0);
 
 			// Check if any of the tags match sync tags
 			const shouldSync = tags.some((tag: string) => syncTags.includes(tag));

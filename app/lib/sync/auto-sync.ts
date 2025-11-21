@@ -32,8 +32,8 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 	// Parse sync tags (comma-separated)
 	const syncTags = shop.syncTags
 		.split(",")
-		.map((tag) => tag.trim())
-		.filter((tag) => tag.length > 0);
+		.map((tag: string) => tag.trim())
+		.filter((tag: string) => tag.length > 0);
 
 	if (syncTags.length === 0) {
 		return { processed: 0, created: 0, updated: 0, errors: [] };

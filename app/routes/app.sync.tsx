@@ -99,7 +99,7 @@ export default function SyncDashboard() {
 							</tr>
 						</thead>
 						<tbody>
-							{syncJobs.map((job) => (
+							{syncJobs.map((job: (typeof syncJobs)[number]) => (
 								<tr key={job.id}>
 									<td>{job.status}</td>
 									<td>

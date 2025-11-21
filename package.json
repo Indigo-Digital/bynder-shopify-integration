@@ -14,7 +14,7 @@
 		"setup": "prisma generate && prisma migrate deploy",
 		"lint": "biome check .",
 		"format": "biome format --write .",
-		"format:check": "biome check --only=formatter .",
+		"format:check": "biome format .",
 		"shopify": "shopify",
 		"prisma": "prisma",
 		"graphql-codegen": "graphql-codegen",

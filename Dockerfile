@@ -18,6 +18,6 @@ COPY . .
 
 RUN pnpm run build
 
-RUN pnpm prune --prod
+RUN CI=true pnpm prune --prod
 
 CMD ["pnpm", "run", "docker-start"]

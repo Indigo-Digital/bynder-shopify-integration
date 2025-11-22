@@ -12,6 +12,7 @@
 		"start": "react-router-serve ./build/server/index.js",
 		"docker-start": "pnpm run setup && pnpm run start",
 		"setup": "prisma generate && prisma migrate deploy",
+		"setup:postgres": "cp prisma/schema.postgresql.prisma prisma/schema.prisma && pnpm run setup",
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"format:check": "biome format .",

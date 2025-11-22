@@ -1,0 +1,37 @@
+# fly.toml app configuration file generated for bynder-shopify-integration
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+
+app = "bynder-shopify-integration"
+primary_region = "iad"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3000
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[processes]
+  app = "pnpm run docker-start"
+

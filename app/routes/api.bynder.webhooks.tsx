@@ -51,31 +51,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			const shouldSync = tags.some((tag: string) => syncTags.includes(tag));
 
 			if (shouldSync) {
-				// Initialize Bynder client
-				if (!env.BYNDER_CLIENT_ID || !env.BYNDER_CLIENT_SECRET) {
+				// Initialize Bynder client with permanent token from env
+				let bynderClient: BynderClient;
+				try {
+					bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
+				} catch (error) {
 					return Response.json(
-						{ error: "Bynder client credentials not configured" },
+						{
+							error:
+								error instanceof Error
+									? error.message
+									: "Bynder configuration error",
+						},
 						{ status: 500 }
 					);
-				}
-
-				const clientConfig: {
-					baseURL: string;
-					clientId: string;
-					clientSecret: string;
-					permanentToken?: string;
-				} = {
-					baseURL: shopConfig.bynderBaseUrl,
-					clientId: env.BYNDER_CLIENT_ID,
-					clientSecret: env.BYNDER_CLIENT_SECRET,
-				};
-				if (shopConfig.bynderAccessToken) {
-					clientConfig.permanentToken = shopConfig.bynderAccessToken;
-				}
-				const bynderClient = BynderClient.createOAuthClient(clientConfig);
-
-				if (shopConfig.bynderAccessToken) {
-					bynderClient.setAccessToken(shopConfig.bynderAccessToken);
 				}
 
 				// Get admin API

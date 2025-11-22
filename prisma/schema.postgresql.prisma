@@ -1,17 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// This is your Prisma schema file for PostgreSQL (production)
+// Use this schema when deploying to Fly.io with managed Postgres
+// To use: copy this file to schema.prisma before deploying
 
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  // For local dev: DATABASE_URL=file:./dev.sqlite
-  // For production: Switch to schema.postgresql.prisma before deploying
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -92,3 +88,4 @@ model SyncJob {
 
   @@index([shopId, status])
 }
+

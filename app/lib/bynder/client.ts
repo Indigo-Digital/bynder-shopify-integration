@@ -1,11 +1,19 @@
 import Bynder from "@bynder/bynder-js-sdk";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
+import { env } from "../env.server.js";
+
+export interface BynderPermanentTokenConfig {
+	baseURL: string;
+	permanentToken: string;
+	clientId: string;
+	clientSecret: string;
+}
 
 export class BynderClient {
 	private bynder: Bynder;
-	public config: BynderConfig;
+	public config: BynderConfig | BynderPermanentTokenConfig;
 
-	constructor(config: BynderConfig) {
+	constructor(config: BynderConfig | BynderPermanentTokenConfig) {
 		this.config = config;
 		const bynderConfig: {
 			baseURL: string;
@@ -19,17 +27,51 @@ export class BynderClient {
 			clientId: config.clientId,
 			clientSecret: config.clientSecret,
 		};
-		if (config.redirectUri) {
+		if ("redirectUri" in config && config.redirectUri) {
 			bynderConfig.redirectUri = config.redirectUri;
 		}
-		if (config.permanentToken) {
+		if ("permanentToken" in config && config.permanentToken) {
 			bynderConfig.permanentToken = config.permanentToken;
 		}
 		this.bynder = new Bynder(bynderConfig);
 	}
 
 	/**
-	 * Initialize OAuth2 client for user actions
+	 * Create client using permanent token (recommended for all operations)
+	 */
+	static createPermanentTokenClient(
+		config: BynderPermanentTokenConfig
+	): BynderClient {
+		if (!config.permanentToken) {
+			throw new Error("permanentToken is required");
+		}
+		return new BynderClient(config);
+	}
+
+	/**
+	 * Create client using permanent token from environment variables
+	 * Requires baseURL (typically from shop config) and uses env vars for token/credentials
+	 */
+	static createFromEnv(baseURL: string): BynderClient {
+		if (!env.BYNDER_PERMANENT_TOKEN) {
+			throw new Error("BYNDER_PERMANENT_TOKEN environment variable is required");
+		}
+		if (!env.BYNDER_CLIENT_ID || !env.BYNDER_CLIENT_SECRET) {
+			throw new Error(
+				"BYNDER_CLIENT_ID and BYNDER_CLIENT_SECRET environment variables are required"
+			);
+		}
+		return BynderClient.createPermanentTokenClient({
+			baseURL,
+			permanentToken: env.BYNDER_PERMANENT_TOKEN,
+			clientId: env.BYNDER_CLIENT_ID,
+			clientSecret: env.BYNDER_CLIENT_SECRET,
+		});
+	}
+
+	/**
+	 * Initialize OAuth2 client for user actions (deprecated - use permanent token instead)
+	 * @deprecated Use createPermanentTokenClient instead
 	 */
 	static createOAuthClient(config: BynderConfig): BynderClient {
 		if (!config.redirectUri) {
@@ -39,7 +81,8 @@ export class BynderClient {
 	}
 
 	/**
-	 * Initialize client credentials client for background jobs
+	 * Initialize client credentials client for background jobs (deprecated - use permanent token instead)
+	 * @deprecated Use createPermanentTokenClient instead
 	 */
 	static async createClientCredentialsClient(
 		config: BynderConfig
@@ -84,6 +127,7 @@ export class BynderClient {
 
 	/**
 	 * Set access token directly (for already authenticated sessions)
+	 * @deprecated Not needed when using permanent token
 	 */
 	setAccessToken(token: string): void {
 		this.bynder = new Bynder({

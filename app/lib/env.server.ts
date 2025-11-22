@@ -7,12 +7,14 @@ const requiredEnvVars = [
 	"SHOPIFY_API_KEY",
 	"SHOPIFY_API_SECRET",
 	"SHOPIFY_APP_URL",
+	"BYNDER_PERMANENT_TOKEN",
 ] as const;
 
 interface EnvConfig {
 	SHOPIFY_API_KEY: string;
 	SHOPIFY_API_SECRET: string;
 	SHOPIFY_APP_URL: string;
+	BYNDER_PERMANENT_TOKEN: string;
 	BYNDER_CLIENT_ID?: string | undefined;
 	BYNDER_CLIENT_SECRET?: string | undefined;
 	SCOPES?: string | undefined;
@@ -41,8 +43,9 @@ export function validateEnv(): EnvConfig {
 	const shopifyApiKey = process.env.SHOPIFY_API_KEY;
 	const shopifyApiSecret = process.env.SHOPIFY_API_SECRET;
 	const shopifyAppUrl = process.env.SHOPIFY_APP_URL;
+	const bynderPermanentToken = process.env.BYNDER_PERMANENT_TOKEN;
 
-	if (!shopifyApiKey || !shopifyApiSecret || !shopifyAppUrl) {
+	if (!shopifyApiKey || !shopifyApiSecret || !shopifyAppUrl || !bynderPermanentToken) {
 		throw new Error("Required environment variables are missing");
 	}
 
@@ -50,6 +53,7 @@ export function validateEnv(): EnvConfig {
 		SHOPIFY_API_KEY: shopifyApiKey,
 		SHOPIFY_API_SECRET: shopifyApiSecret,
 		SHOPIFY_APP_URL: shopifyAppUrl,
+		BYNDER_PERMANENT_TOKEN: bynderPermanentToken,
 		BYNDER_CLIENT_ID: process.env.BYNDER_CLIENT_ID ?? undefined,
 		BYNDER_CLIENT_SECRET: process.env.BYNDER_CLIENT_SECRET ?? undefined,
 		SCOPES: process.env.SCOPES ?? undefined,

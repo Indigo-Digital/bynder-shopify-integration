@@ -16,6 +16,9 @@ RUN pnpm install --frozen-lockfile && pnpm store prune
 
 COPY . .
 
+# Use PostgreSQL schema for production
+RUN cp prisma/schema.postgresql.prisma prisma/schema.prisma
+
 RUN pnpm run build
 
 RUN CI=true pnpm prune --prod

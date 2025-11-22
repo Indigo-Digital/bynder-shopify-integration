@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { redirect, useFetcher, useLoaderData } from "react-router";
 import prisma from "../db.server.js";
@@ -42,7 +42,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		take: 10,
 	});
 
-	const lastSuccessfulJob = recentJobs.find((job) => job.status === "completed");
+	const lastSuccessfulJob = recentJobs.find(
+		(job) => job.status === "completed"
+	);
 	const lastJob = recentJobs[0] || null;
 
 	// Calculate success rate (last 10 jobs)
@@ -86,11 +88,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 	if (intent === "update_sync_tags") {
 		const syncTagsInput = formData.get("syncTags")?.toString() || "";
 		// Parse comma-separated tags, trim, and filter empty
-		const syncTags = syncTagsInput
-			.split(",")
-			.map((tag: string) => tag.trim())
-			.filter((tag: string) => tag.length > 0)
-			.join(",") || "shopify-sync";
+		const syncTags =
+			syncTagsInput
+				.split(",")
+				.map((tag: string) => tag.trim())
+				.filter((tag: string) => tag.length > 0)
+				.join(",") || "shopify-sync";
 
 		await prisma.shop.upsert({
 			where: { shop },
@@ -166,9 +169,9 @@ export default function SettingsPage() {
 	};
 
 	const handleRemoveTag = (tagToRemove: string) => {
-		const updatedTags = tagList
-			.filter((tag: string) => tag !== tagToRemove)
-			.join(",") || "shopify-sync";
+		const updatedTags =
+			tagList.filter((tag: string) => tag !== tagToRemove).join(",") ||
+			"shopify-sync";
 		setSyncTags(updatedTags);
 	};
 
@@ -205,20 +208,24 @@ export default function SettingsPage() {
 					<fetcher.Form method="POST">
 						<input type="hidden" name="intent" value="update_bynder_url" />
 						<s-stack direction="block" gap="base">
-							<s-text-field
-								label="Bynder Base URL"
-								value={bynderBaseUrl}
-								onChange={(e) => {
-									const target = e.currentTarget;
-									if (target) {
-										setBynderBaseUrl(target.value);
-									}
-								}}
-								name="bynderBaseUrl"
-								placeholder="https://portal.getbynder.com"
-								required
-								helpText="Your Bynder portal URL (e.g., https://portal.getbynder.com)"
-							/>
+							<s-stack direction="block" gap="base">
+								<s-text-field
+									label="Bynder Base URL"
+									value={bynderBaseUrl}
+									onChange={(e) => {
+										const target = e.currentTarget;
+										if (target) {
+											setBynderBaseUrl(target.value);
+										}
+									}}
+									name="bynderBaseUrl"
+									placeholder="https://portal.getbynder.com"
+									required
+								/>
+								<s-text>
+									Your Bynder portal URL (e.g., https://portal.getbynder.com)
+								</s-text>
+							</s-stack>
 							<s-button type="submit" disabled={isSubmitting}>
 								{isSubmitting ? "Saving..." : "Save Base URL"}
 							</s-button>
@@ -234,20 +241,17 @@ export default function SettingsPage() {
 							>
 								{isTesting ? "Testing..." : "Test Connection"}
 							</s-button>
-							{testFetcher.data && (
-								<>
-									{testFetcher.data.connected ? (
-										<s-banner tone="success">
-											Connection successful! Base URL: {testFetcher.data.baseURL}
-										</s-banner>
-									) : (
-										<s-banner tone="critical">
-											Connection failed:{" "}
-											{testFetcher.data.error || "Unknown error"}
-										</s-banner>
-									)}
-								</>
-							)}
+							{testFetcher.data &&
+								(testFetcher.data.connected ? (
+									<s-banner tone="success">
+										Connection successful! Base URL: {testFetcher.data.baseURL}
+									</s-banner>
+								) : (
+									<s-banner tone="critical">
+										Connection failed:{" "}
+										{testFetcher.data.error || "Unknown error"}
+									</s-banner>
+								))}
 							<s-paragraph>
 								Using permanent token authentication (configured in environment
 								variables)
@@ -279,8 +283,7 @@ export default function SettingsPage() {
 						</s-stack>
 						{stats.lastSyncTime && (
 							<s-paragraph>
-								Last Sync:{" "}
-								{new Date(stats.lastSyncTime).toLocaleString()} (
+								Last Sync: {new Date(stats.lastSyncTime).toLocaleString()} (
 								{stats.lastSyncStatus || "unknown"})
 							</s-paragraph>
 						)}
@@ -305,7 +308,7 @@ export default function SettingsPage() {
 								borderWidth="base"
 								borderRadius="base"
 							>
-								<s-stack direction="block" gap="tight">
+								<s-stack direction="block" gap="base">
 									<s-text>
 										<strong>
 											{new Date(failure.createdAt).toLocaleString()}
@@ -315,9 +318,7 @@ export default function SettingsPage() {
 										<s-text tone="critical">{failure.error}</s-text>
 									)}
 									{failure.assetsProcessed > 0 && (
-										<s-text>
-											Assets processed: {failure.assetsProcessed}
-										</s-text>
+										<s-text>Assets processed: {failure.assetsProcessed}</s-text>
 									)}
 								</s-stack>
 							</s-box>
@@ -338,7 +339,7 @@ export default function SettingsPage() {
 						</s-paragraph>
 
 						{/* Tag Input */}
-						<s-stack direction="inline" gap="tight">
+						<s-stack direction="inline" gap="base">
 							<s-text-field
 								label="Add Tag"
 								value={newTag}
@@ -349,12 +350,6 @@ export default function SettingsPage() {
 									}
 								}}
 								placeholder="Enter tag name"
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
-										e.preventDefault();
-										handleAddTag();
-									}
-								}}
 							/>
 							<s-button
 								type="button"
@@ -368,24 +363,23 @@ export default function SettingsPage() {
 
 						{/* Tag List */}
 						{tagList.length > 0 && (
-							<s-stack direction="block" gap="tight">
+							<s-stack direction="block" gap="base">
 								<s-text>
 									<strong>Active Tags ({tagList.length}):</strong>
 								</s-text>
-								<s-stack direction="inline" gap="tight">
+								<s-stack direction="inline" gap="base">
 									{tagList.map((tag: string) => (
 										<s-box
 											key={tag}
-											padding="tight"
+											padding="base"
 											borderWidth="base"
 											borderRadius="base"
 										>
-											<s-stack direction="inline" gap="tight">
+											<s-stack direction="inline" gap="base">
 												<s-text>{tag}</s-text>
 												<s-button
 													type="button"
-													variant="plain"
-													size="small"
+													variant="tertiary"
 													onClick={() => handleRemoveTag(tag)}
 												>
 													×

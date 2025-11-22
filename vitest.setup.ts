@@ -5,6 +5,7 @@ import { vi } from "vitest";
 process.env.SHOPIFY_API_KEY = "test-api-key";
 process.env.SHOPIFY_API_SECRET = "test-api-secret";
 process.env.SHOPIFY_APP_URL = "https://test.example.com";
+process.env.BYNDER_PERMANENT_TOKEN = "test-bynder-permanent-token";
 process.env.BYNDER_CLIENT_ID = "test-bynder-client-id";
 process.env.BYNDER_CLIENT_SECRET = "test-bynder-client-secret";
 

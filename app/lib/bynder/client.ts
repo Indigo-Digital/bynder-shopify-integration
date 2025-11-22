@@ -1,6 +1,6 @@
 import Bynder from "@bynder/bynder-js-sdk";
-import type { BynderConfig, BynderOAuthTokens } from "./types.js";
 import { env } from "../env.server.js";
+import type { BynderConfig, BynderOAuthTokens } from "./types.js";
 
 export interface BynderPermanentTokenConfig {
 	baseURL: string;
@@ -54,7 +54,9 @@ export class BynderClient {
 	 */
 	static createFromEnv(baseURL: string): BynderClient {
 		if (!env.BYNDER_PERMANENT_TOKEN) {
-			throw new Error("BYNDER_PERMANENT_TOKEN environment variable is required");
+			throw new Error(
+				"BYNDER_PERMANENT_TOKEN environment variable is required"
+			);
 		}
 		if (!env.BYNDER_CLIENT_ID || !env.BYNDER_CLIENT_SECRET) {
 			throw new Error(

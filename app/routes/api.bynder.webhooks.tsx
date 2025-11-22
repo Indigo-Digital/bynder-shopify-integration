@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
-import { env } from "../lib/env.server.js";
 import { syncBynderAssets } from "../lib/sync/auto-sync.js";
 import { authenticate } from "../shopify.server.js";
 

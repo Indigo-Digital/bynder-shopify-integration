@@ -45,7 +45,12 @@ export function validateEnv(): EnvConfig {
 	const shopifyAppUrl = process.env.SHOPIFY_APP_URL;
 	const bynderPermanentToken = process.env.BYNDER_PERMANENT_TOKEN;
 
-	if (!shopifyApiKey || !shopifyApiSecret || !shopifyAppUrl || !bynderPermanentToken) {
+	if (
+		!shopifyApiKey ||
+		!shopifyApiSecret ||
+		!shopifyAppUrl ||
+		!bynderPermanentToken
+	) {
 		throw new Error("Required environment variables are missing");
 	}
 

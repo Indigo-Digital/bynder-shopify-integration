@@ -49,9 +49,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 				connected: false,
 				baseURL: shopConfig.bynderBaseUrl,
 				error:
-					error instanceof Error
-						? error.message
-						: "Connection test failed",
+					error instanceof Error ? error.message : "Connection test failed",
 			},
 			{ status: 500 }
 		);
@@ -64,4 +62,3 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
 	return loader({ request } as LoaderFunctionArgs);
 };
-

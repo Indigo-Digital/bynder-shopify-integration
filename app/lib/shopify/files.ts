@@ -245,10 +245,13 @@ export async function uploadBynderAsset(
 	for (const param of stagedTarget.parameters) {
 		formData.append(param.name, param.value);
 	}
-	// Add the file - convert Buffer to Uint8Array for Blob
+	// Add the file - create a Blob from buffer for FormData compatibility
+	// Convert Buffer to Uint8Array for Blob constructor
 	const uint8Array = new Uint8Array(buffer);
-	const blob = new Blob([uint8Array], { type: contentType });
-	formData.append("file", blob, fileName);
+	const fileBlob = new File([uint8Array], sanitizedStagedFilename, {
+		type: contentType,
+	});
+	formData.append("file", fileBlob);
 
 	const uploadResponse = await fetch(stagedTarget.url, {
 		method: "POST",

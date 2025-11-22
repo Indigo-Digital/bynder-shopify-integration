@@ -237,17 +237,29 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 							? migrationError.message
 							: String(migrationError)
 					);
+					// Store detailed errors in the error field (fallback when migration fails)
+					// Try to store at least the first few errors with details
+					let errorMessage: string | null = null;
+					if (errors.length > 0) {
+						// Store first 3 errors with details, then summary
+						const errorDetails = errors
+							.slice(0, 3)
+							.map((err) => `Asset ${err.assetId}: ${err.error}`)
+							.join("; ");
+						const remaining = errors.length - 3;
+						errorMessage =
+							remaining > 0
+								? `${errors.length} errors: ${errorDetails} (+ ${remaining} more)`
+								: `${errors.length} error${errors.length !== 1 ? "s" : ""}: ${errorDetails}`;
+					}
+
 					await prisma.syncJob.update({
 						where: { id: syncJob.id },
 						data: {
 							status: "completed",
 							completedAt: new Date(),
 							assetsProcessed: allAssets.length,
-							// Store errors in the error field if there are any (limited to first error)
-							error:
-								errors.length > 0
-									? `${errors.length} asset error${errors.length !== 1 ? "s" : ""} occurred.`
-									: null,
+							error: errorMessage,
 						},
 					});
 				}

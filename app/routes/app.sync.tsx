@@ -369,6 +369,7 @@ export default function SyncDashboard() {
 														return <span style={{ color: "#999" }}>-</span>;
 													}
 
+													// Calculate error count - prefer JSON errors, fallback to error field
 													const errorCount =
 														errorList.length || (job.error ? 1 : 0);
 													const isExpanded = expandedErrors.has(job.id);
@@ -410,32 +411,8 @@ export default function SyncDashboard() {
 																		border: "1px solid #f5c6cb",
 																	}}
 																>
-																	{job.error && (
-																		<div
-																			style={{
-																				marginBottom:
-																					errorList.length > 0 ? "0.5rem" : "0",
-																				paddingBottom:
-																					errorList.length > 0 ? "0.5rem" : "0",
-																				borderBottom:
-																					errorList.length > 0
-																						? "1px solid #f5c6cb"
-																						: "none",
-																			}}
-																		>
-																			<strong>General Error:</strong>
-																			<div
-																				style={{
-																					marginTop: "0.25rem",
-																					fontSize: "0.8125rem",
-																					wordBreak: "break-word",
-																				}}
-																			>
-																				{job.error}
-																			</div>
-																		</div>
-																	)}
-																	{errorList.length > 0 && (
+																	{/* Show detailed JSON errors first if available */}
+																	{errorList.length > 0 ? (
 																		<div>
 																			<strong>Asset Errors:</strong>
 																			<ul
@@ -449,7 +426,6 @@ export default function SyncDashboard() {
 																						key={err.assetId}
 																						style={{
 																							marginBottom: "0.5rem",
-																							fontSize: "0.8125rem",
 																						}}
 																					>
 																						<strong>
@@ -460,7 +436,22 @@ export default function SyncDashboard() {
 																				))}
 																			</ul>
 																		</div>
-																	)}
+																	) : job.error ? (
+																		/* Fallback: show error field if no JSON errors */
+																		<div>
+																			<strong>Errors:</strong>
+																			<div
+																				style={{
+																					marginTop: "0.25rem",
+																					fontSize: "0.8125rem",
+																					wordBreak: "break-word",
+																					whiteSpace: "pre-wrap",
+																				}}
+																			>
+																				{job.error}
+																			</div>
+																		</div>
+																	) : null}
 																</div>
 															)}
 														</div>

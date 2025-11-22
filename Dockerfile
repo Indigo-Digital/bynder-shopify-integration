@@ -18,6 +18,8 @@ COPY . .
 
 # Use PostgreSQL schema for production
 RUN cp prisma/schema.postgresql.prisma prisma/schema.prisma
+# Update migration lock to PostgreSQL for production
+RUN echo 'provider = "postgresql"' > prisma/migrations/migration_lock.toml
 
 RUN pnpm run build
 

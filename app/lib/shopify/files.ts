@@ -1,4 +1,3 @@
-import { Readable } from "node:stream";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
 import type { AdminApi } from "../types.js";
@@ -241,46 +240,59 @@ export async function uploadBynderAsset(
 	}
 
 	// Step 2: Upload file to staged upload URL
+	// For Shopify staged uploads (typically S3), we need to:
+	// 1. Add all parameters first (in order)
+	// 2. Add the file last
+	// 3. NOT set Content-Type header manually (let fetch set it with boundary)
 	const formData = new FormData();
-	// Add parameters from staged upload
+
+	// Add parameters from staged upload first (S3 requires specific order)
 	for (const param of stagedTarget.parameters) {
 		formData.append(param.name, param.value);
 	}
-	// Add the file - use stream for form-data package compatibility
-	// The form-data package (used by fetch in Node.js) expects streams with .on() method
-	// Check if FormData is from form-data package by checking for _boundary property
-	// biome-ignore lint/suspicious/noExplicitAny: form-data package has non-standard properties
-	const formDataAny = formData as any;
-	const isFormDataPackage =
-		typeof formDataAny._boundary !== "undefined" ||
-		typeof formDataAny.getBoundary === "function";
 
-	if (isFormDataPackage) {
-		// form-data package - use stream
-		const bufferStream = Readable.from(buffer);
-		formDataAny.append("file", bufferStream, {
-			filename: sanitizedStagedFilename,
-			contentType: contentType,
-		});
-	} else {
-		// Standard FormData (jsdom/browser) - use File/Blob
-		const uint8Array = new Uint8Array(buffer);
-		const fileBlob = new File([uint8Array], sanitizedStagedFilename, {
-			type: contentType,
-		});
-		formData.append("file", fileBlob);
-	}
+	// Add the file last - this is critical for S3 uploads
+	// Use File for Node.js 18+ FormData (which is now standard)
+	// File is more appropriate than Blob for file uploads as it has a name property
+	const uint8Array = new Uint8Array(buffer);
+	const uploadFile = new File([uint8Array], sanitizedStagedFilename, {
+		type: contentType,
+	});
+	formData.append("file", uploadFile);
 
+	// Upload to staged URL - DO NOT set Content-Type header manually
+	// fetch will automatically set it with the correct boundary for multipart/form-data
 	const uploadResponse = await fetch(stagedTarget.url, {
 		method: "POST",
 		body: formData,
+		// Explicitly do NOT set headers - let fetch handle Content-Type with boundary
 	});
 
 	if (!uploadResponse.ok) {
 		const statusText = uploadResponse.statusText || "Unknown error";
 		const statusCode = uploadResponse.status;
+
+		// Try to get more details from the response body
+		let errorDetails = statusText;
+		try {
+			const errorBody = await uploadResponse.text();
+			if (errorBody && errorBody.length < 1000) {
+				errorDetails = `${statusText} - ${errorBody}`;
+			}
+		} catch {
+			// Ignore errors reading response body
+		}
+
+		// Log the staged upload URL and parameters for debugging (without sensitive values)
+		console.error(
+			`[Upload Error] Failed to upload to staged URL: ${stagedTarget.url.substring(0, 100)}...`
+		);
+		console.error(
+			`[Upload Error] Parameters: ${stagedTarget.parameters.map((p: { name: string; value: string }) => p.name).join(", ")}`
+		);
+
 		throw new Error(
-			`Failed to upload file to staged URL: HTTP ${statusCode}: ${statusText}`
+			`Failed to upload file to staged URL: HTTP ${statusCode}: ${errorDetails}`
 		);
 	}
 

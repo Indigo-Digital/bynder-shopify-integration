@@ -101,11 +101,6 @@ export function AssetBrowser({
 		new Set(assets.flatMap((asset) => asset.tags || []))
 	).sort();
 
-	// Extract all unique asset types from current assets
-	const allAssetTypes = Array.from(
-		new Set(assets.map((asset) => asset.type).filter(Boolean))
-	).sort();
-
 	// Get thumbnail URL for an asset
 	const getThumbnailUrl = (asset: BynderAsset): string | null => {
 		if (asset.thumbnails && Object.keys(asset.thumbnails).length > 0) {
@@ -311,48 +306,52 @@ export function AssetBrowser({
 																gap: "0.5rem",
 															}}
 														>
-														{asset.tags.map((tag) => (
-															<button
-																key={tag}
-																type="button"
-																onClick={() => handleTagClick(tag)}
-																disabled={existingTags.includes(tag)}
-																style={{
-																	padding: "0.25rem 0.75rem",
-																	borderRadius: "4px",
-																	border: "1px solid #ccc",
-																	backgroundColor: existingTags.includes(tag)
-																		? "#007bff"
-																		: "#f8f9fa",
-																	color: existingTags.includes(tag)
-																		? "#fff"
-																		: "#333",
-																	cursor: existingTags.includes(tag)
-																		? "not-allowed"
-																		: "pointer",
-																	fontSize: "0.875rem",
-																	fontWeight: "500",
-																	transition: "all 0.2s",
-																}}
-																onMouseEnter={(e) => {
-																	if (!existingTags.includes(tag)) {
-																		e.currentTarget.style.backgroundColor = "#e9ecef";
-																	}
-																}}
-																onMouseLeave={(e) => {
-																	if (!existingTags.includes(tag)) {
-																		e.currentTarget.style.backgroundColor = "#f8f9fa";
-																	}
-																}}
-															>
-																{tag}
-															</button>
-														))}
+															{asset.tags.map((tag) => (
+																<button
+																	key={tag}
+																	type="button"
+																	onClick={() => handleTagClick(tag)}
+																	disabled={existingTags.includes(tag)}
+																	style={{
+																		padding: "0.25rem 0.75rem",
+																		borderRadius: "4px",
+																		border: "1px solid #ccc",
+																		backgroundColor: existingTags.includes(tag)
+																			? "#007bff"
+																			: "#f8f9fa",
+																		color: existingTags.includes(tag)
+																			? "#fff"
+																			: "#333",
+																		cursor: existingTags.includes(tag)
+																			? "not-allowed"
+																			: "pointer",
+																		fontSize: "0.875rem",
+																		fontWeight: "500",
+																		transition: "all 0.2s",
+																	}}
+																	onMouseEnter={(e) => {
+																		if (!existingTags.includes(tag)) {
+																			e.currentTarget.style.backgroundColor =
+																				"#e9ecef";
+																		}
+																	}}
+																	onMouseLeave={(e) => {
+																		if (!existingTags.includes(tag)) {
+																			e.currentTarget.style.backgroundColor =
+																				"#f8f9fa";
+																		}
+																	}}
+																>
+																	{tag}
+																</button>
+															))}
 														</div>
 													</div>
 												) : (
 													<div style={{ marginTop: "0.5rem" }}>
-														<span style={{ fontSize: "0.875rem", color: "#666" }}>
+														<span
+															style={{ fontSize: "0.875rem", color: "#666" }}
+														>
 															Tags: None
 														</span>
 													</div>
@@ -422,48 +421,52 @@ export function AssetBrowser({
 																gap: "0.5rem",
 															}}
 														>
-														{asset.tags.map((tag) => (
-															<button
-																key={tag}
-																type="button"
-																onClick={() => handleTagClick(tag)}
-																disabled={existingTags.includes(tag)}
-																style={{
-																	padding: "0.25rem 0.75rem",
-																	borderRadius: "4px",
-																	border: "1px solid #ccc",
-																	backgroundColor: existingTags.includes(tag)
-																		? "#007bff"
-																		: "#f8f9fa",
-																	color: existingTags.includes(tag)
-																		? "#fff"
-																		: "#333",
-																	cursor: existingTags.includes(tag)
-																		? "not-allowed"
-																		: "pointer",
-																	fontSize: "0.875rem",
-																	fontWeight: "500",
-																	transition: "all 0.2s",
-																}}
-																onMouseEnter={(e) => {
-																	if (!existingTags.includes(tag)) {
-																		e.currentTarget.style.backgroundColor = "#e9ecef";
-																	}
-																}}
-																onMouseLeave={(e) => {
-																	if (!existingTags.includes(tag)) {
-																		e.currentTarget.style.backgroundColor = "#f8f9fa";
-																	}
-																}}
-															>
-																{tag}
-															</button>
-														))}
+															{asset.tags.map((tag) => (
+																<button
+																	key={tag}
+																	type="button"
+																	onClick={() => handleTagClick(tag)}
+																	disabled={existingTags.includes(tag)}
+																	style={{
+																		padding: "0.25rem 0.75rem",
+																		borderRadius: "4px",
+																		border: "1px solid #ccc",
+																		backgroundColor: existingTags.includes(tag)
+																			? "#007bff"
+																			: "#f8f9fa",
+																		color: existingTags.includes(tag)
+																			? "#fff"
+																			: "#333",
+																		cursor: existingTags.includes(tag)
+																			? "not-allowed"
+																			: "pointer",
+																		fontSize: "0.875rem",
+																		fontWeight: "500",
+																		transition: "all 0.2s",
+																	}}
+																	onMouseEnter={(e) => {
+																		if (!existingTags.includes(tag)) {
+																			e.currentTarget.style.backgroundColor =
+																				"#e9ecef";
+																		}
+																	}}
+																	onMouseLeave={(e) => {
+																		if (!existingTags.includes(tag)) {
+																			e.currentTarget.style.backgroundColor =
+																				"#f8f9fa";
+																		}
+																	}}
+																>
+																	{tag}
+																</button>
+															))}
 														</div>
 													</div>
 												) : (
 													<div style={{ marginTop: "0.5rem" }}>
-														<span style={{ fontSize: "0.875rem", color: "#666" }}>
+														<span
+															style={{ fontSize: "0.875rem", color: "#666" }}
+														>
 															Tags: None
 														</span>
 													</div>

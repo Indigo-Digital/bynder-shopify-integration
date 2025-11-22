@@ -89,13 +89,26 @@
 
 ## Pre-Commit Requirements
 
-**CRITICAL: Before any commit, ALL of the following must pass:**
+**CRITICAL: Before ANY commit or push, ALL of the following must pass:**
 
-1. **Tests must pass**: Run `pnpm test` - all tests must pass
+1. **Tests must pass**: Run `pnpm test --run` - all tests must pass
 2. **Typecheck must pass**: Run `pnpm typecheck` - no type errors allowed
 3. **Linting must pass**: Run `pnpm lint` - no linting errors allowed
 
-**Never commit code that fails any of these checks. Fix all issues before committing.**
+**NEVER commit or push code that fails any of these checks. Fix all issues before committing or pushing.**
+
+**Before pushing, always run:**
+```bash
+# Run all checks (PowerShell):
+pnpm lint; pnpm typecheck; pnpm test --run
+
+# Or run individually to see specific errors:
+pnpm lint
+pnpm typecheck
+pnpm test --run
+```
+
+If any of these commands fail, fix the issues before pushing.
 
 ## Best Practices
 

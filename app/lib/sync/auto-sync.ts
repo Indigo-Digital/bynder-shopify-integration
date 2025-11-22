@@ -138,11 +138,30 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 					}
 				}
 			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : String(error);
+				console.error(
+					`[Sync Error] Failed to sync asset ${asset.id}:`,
+					errorMessage,
+					error instanceof Error ? error.stack : undefined
+				);
 				errors.push({
 					assetId: asset.id,
-					error: error instanceof Error ? error.message : String(error),
+					error: errorMessage,
 				});
 			}
+		}
+
+		// Log summary
+		if (errors.length > 0) {
+			console.error(
+				`[Sync Job] Job ${syncJob.id} completed with ${errors.length} error(s):`,
+				errors
+			);
+		} else {
+			console.log(
+				`[Sync Job] Job ${syncJob.id} completed successfully: ${created} created, ${updated} updated`
+			);
 		}
 
 		// Update sync job with results
@@ -306,12 +325,18 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		};
 	} catch (error) {
 		// Mark job as failed
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error(
+			`[Sync Job Failed] Job ${syncJob.id} failed:`,
+			errorMessage,
+			error instanceof Error ? error.stack : undefined
+		);
 		await prisma.syncJob.update({
 			where: { id: syncJob.id },
 			data: {
 				status: "failed",
 				completedAt: new Date(),
-				error: error instanceof Error ? error.message : String(error),
+				error: errorMessage,
 			},
 		});
 		throw error;

@@ -70,6 +70,21 @@ export default function SyncDashboard() {
 		}
 	}, [fetcher.state, fetcher.data, revalidator]);
 
+	// Poll for running sync jobs - only when there's a running job
+	useEffect(() => {
+		const hasRunningJob = syncJobs.some((job) => job.status === "running");
+		if (!hasRunningJob) {
+			return; // No running jobs, don't poll
+		}
+
+		// Poll every 2 seconds when there's a running job
+		const interval = setInterval(() => {
+			revalidator.revalidate();
+		}, 2000);
+
+		return () => clearInterval(interval);
+	}, [syncJobs, revalidator]);
+
 	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
 
 	const showSuccess =
@@ -358,9 +373,30 @@ export default function SyncDashboard() {
 													}> = [];
 													if (job.errors) {
 														try {
-															errorList = JSON.parse(job.errors);
-														} catch {
-															// If parsing fails, ignore
+															const parsed = JSON.parse(job.errors);
+															// Handle both array and object formats
+															if (Array.isArray(parsed)) {
+																errorList = parsed;
+															} else if (
+																typeof parsed === "object" &&
+																parsed !== null
+															) {
+																// If it's an object, try to extract errors
+																errorList = Object.entries(parsed).map(
+																	([key, value]) => ({
+																		assetId: key,
+																		error: String(value),
+																	})
+																);
+															}
+														} catch (e) {
+															// If parsing fails, log and try to use as string
+															console.warn(
+																`Failed to parse errors for job ${job.id}:`,
+																e,
+																"Raw errors:",
+																job.errors
+															);
 														}
 													}
 													const hasErrors = errorList.length > 0 || job.error;
@@ -449,6 +485,21 @@ export default function SyncDashboard() {
 																				}}
 																			>
 																				{job.error}
+																			</div>
+																		</div>
+																	) : job.errors ? (
+																		/* Fallback: show raw errors if JSON parsing failed */
+																		<div>
+																			<strong>Errors (raw):</strong>
+																			<div
+																				style={{
+																					marginTop: "0.25rem",
+																					fontSize: "0.8125rem",
+																					wordBreak: "break-word",
+																					whiteSpace: "pre-wrap",
+																				}}
+																			>
+																				{job.errors}
 																			</div>
 																		</div>
 																	) : null}

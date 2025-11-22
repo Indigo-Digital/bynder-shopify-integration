@@ -47,27 +47,36 @@ async function checkAndApplyMigration() {
 				"Detected missing database columns. Applying migration automatically..."
 			);
 			try {
-				// Check database type and add columns accordingly
-				// SQLite doesn't support IF NOT EXISTS, so we need to handle errors
-				const addColumn = async (columnDef: string) => {
+				// Add columns - SQLite doesn't support IF NOT EXISTS, so catch duplicate errors
+				const addColumn = async (columnDef: string, columnName: string) => {
 					try {
 						await prisma.$executeRawUnsafe(
 							`ALTER TABLE "SyncJob" ADD COLUMN ${columnDef}`
 						);
+						console.log(`Added column: ${columnName}`);
 					} catch (err) {
 						// Column might already exist (race condition or already added)
 						if (
 							err instanceof Error &&
-							!err.message.includes("duplicate column")
+							(err.message.includes("duplicate column") ||
+								err.message.includes("already exists"))
 						) {
-							throw err;
+							console.log(`Column ${columnName} already exists, skipping`);
+							return;
 						}
+						throw err;
 					}
 				};
 
-				await addColumn('"errors" TEXT');
-				await addColumn('"assetsCreated" INTEGER NOT NULL DEFAULT 0');
-				await addColumn('"assetsUpdated" INTEGER NOT NULL DEFAULT 0');
+				await addColumn('"errors" TEXT', "errors");
+				await addColumn(
+					'"assetsCreated" INTEGER NOT NULL DEFAULT 0',
+					"assetsCreated"
+				);
+				await addColumn(
+					'"assetsUpdated" INTEGER NOT NULL DEFAULT 0',
+					"assetsUpdated"
+				);
 				console.log("Migration applied successfully!");
 			} catch (migrationError) {
 				console.error("Failed to apply migration:", migrationError);

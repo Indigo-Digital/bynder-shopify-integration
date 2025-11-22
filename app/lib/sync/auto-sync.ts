@@ -161,28 +161,104 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 				},
 			});
 		} catch (error) {
-			// If migration hasn't been run yet, update without new fields
+			// If migration hasn't been run yet, try to apply it automatically
 			if (
 				error instanceof Error &&
 				error.message.includes("Unknown argument")
 			) {
-				console.warn(
-					"Database migration not applied yet. Run 'pnpm prisma migrate dev' to enable error tracking."
+				console.log(
+					"Detected missing database columns. Attempting to apply migration automatically..."
 				);
-				// Fall back to basic update without new fields
-				await prisma.syncJob.update({
-					where: { id: syncJob.id },
-					data: {
-						status: "completed",
-						completedAt: new Date(),
-						assetsProcessed: allAssets.length,
-						// Store errors in the error field if there are any (limited to first error)
-						error:
-							errors.length > 0
-								? `${errors.length} asset error${errors.length !== 1 ? "s" : ""} occurred. Run migration to see details.`
-								: null,
-					},
-				});
+				try {
+					// Try to add the columns directly
+					await prisma.$executeRawUnsafe(
+						`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS "errors" TEXT`
+					);
+					await prisma.$executeRawUnsafe(
+						`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS "assetsCreated" INTEGER NOT NULL DEFAULT 0`
+					);
+					await prisma.$executeRawUnsafe(
+						`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS "assetsUpdated" INTEGER NOT NULL DEFAULT 0`
+					);
+					console.log("Migration applied successfully! Retrying update...");
+					// Retry the update with new fields
+					await prisma.syncJob.update({
+						where: { id: syncJob.id },
+						data: {
+							status: "completed",
+							completedAt: new Date(),
+							assetsProcessed: allAssets.length,
+							assetsCreated: created,
+							assetsUpdated: updated,
+							errors: errors.length > 0 ? JSON.stringify(errors) : null,
+						},
+					});
+				} catch (migrationError) {
+					// If migration fails (e.g., SQLite doesn't support IF NOT EXISTS), try without it
+					if (
+						migrationError instanceof Error &&
+						migrationError.message.includes("IF NOT EXISTS")
+					) {
+						try {
+							// SQLite doesn't support IF NOT EXISTS, so try without it and catch duplicate errors
+							await prisma.$executeRawUnsafe(
+								`ALTER TABLE "SyncJob" ADD COLUMN "errors" TEXT`
+							);
+						} catch (e) {
+							if (!(e instanceof Error && e.message.includes("duplicate"))) {
+								throw e;
+							}
+						}
+						try {
+							await prisma.$executeRawUnsafe(
+								`ALTER TABLE "SyncJob" ADD COLUMN "assetsCreated" INTEGER NOT NULL DEFAULT 0`
+							);
+						} catch (e) {
+							if (!(e instanceof Error && e.message.includes("duplicate"))) {
+								throw e;
+							}
+						}
+						try {
+							await prisma.$executeRawUnsafe(
+								`ALTER TABLE "SyncJob" ADD COLUMN "assetsUpdated" INTEGER NOT NULL DEFAULT 0`
+							);
+						} catch (e) {
+							if (!(e instanceof Error && e.message.includes("duplicate"))) {
+								throw e;
+							}
+						}
+						// Retry the update
+						await prisma.syncJob.update({
+							where: { id: syncJob.id },
+							data: {
+								status: "completed",
+								completedAt: new Date(),
+								assetsProcessed: allAssets.length,
+								assetsCreated: created,
+								assetsUpdated: updated,
+								errors: errors.length > 0 ? JSON.stringify(errors) : null,
+							},
+						});
+					} else {
+						// Migration failed, fall back to basic update
+						console.warn(
+							"Failed to apply migration automatically. Using fallback update."
+						);
+						await prisma.syncJob.update({
+							where: { id: syncJob.id },
+							data: {
+								status: "completed",
+								completedAt: new Date(),
+								assetsProcessed: allAssets.length,
+								// Store errors in the error field if there are any (limited to first error)
+								error:
+									errors.length > 0
+										? `${errors.length} asset error${errors.length !== 1 ? "s" : ""} occurred.`
+										: null,
+							},
+						});
+					}
+				}
 			} else {
 				throw error;
 			}

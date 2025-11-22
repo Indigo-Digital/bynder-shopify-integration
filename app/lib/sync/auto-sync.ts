@@ -217,18 +217,48 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 						"assetsUpdated"
 					);
 					console.log("Migration applied successfully! Retrying update...");
-					// Retry the update with new fields
-					await prisma.syncJob.update({
-						where: { id: syncJob.id },
-						data: {
-							status: "completed",
-							completedAt: new Date(),
-							assetsProcessed: allAssets.length,
-							assetsCreated: created,
-							assetsUpdated: updated,
-							errors: errors.length > 0 ? JSON.stringify(errors) : null,
-						},
-					});
+					// Retry the update with new fields using raw SQL
+					// Prisma Client hasn't been regenerated yet, so use raw SQL
+					// Reuse the dbUrl and isPostgreSQL variables from above
+					if (isPostgreSQL) {
+						// PostgreSQL: Use parameterized query
+						await prisma.$executeRawUnsafe(
+							`UPDATE "SyncJob" SET 
+								status = $1,
+								"completedAt" = $2,
+								"assetsProcessed" = $3,
+								"assetsCreated" = $4,
+								"assetsUpdated" = $5,
+								errors = $6
+							WHERE id = $7`,
+							"completed",
+							new Date(),
+							allAssets.length,
+							created,
+							updated,
+							errors.length > 0 ? JSON.stringify(errors) : null,
+							syncJob.id
+						);
+					} else {
+						// SQLite: Use parameterized query
+						await prisma.$executeRawUnsafe(
+							`UPDATE SyncJob SET 
+								status = ?,
+								completedAt = ?,
+								assetsProcessed = ?,
+								assetsCreated = ?,
+								assetsUpdated = ?,
+								errors = ?
+							WHERE id = ?`,
+							"completed",
+							new Date(),
+							allAssets.length,
+							created,
+							updated,
+							errors.length > 0 ? JSON.stringify(errors) : null,
+							syncJob.id
+						);
+					}
 				} catch (migrationError) {
 					// Migration failed, fall back to basic update
 					console.warn(

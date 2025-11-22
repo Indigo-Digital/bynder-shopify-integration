@@ -1,4 +1,8 @@
 import { PrismaClient } from "@prisma/client";
+import { initializeQuietLogging } from "./lib/logger.server.js";
+
+// Initialize quiet logging early to filter HTTP request logs
+initializeQuietLogging();
 
 declare global {
 	// eslint-disable-next-line no-var

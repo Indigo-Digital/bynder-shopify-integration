@@ -85,7 +85,10 @@ model SyncJob {
   startedAt   DateTime?
   completedAt DateTime?
   error       String?
+  errors      String?  // JSON array of { assetId, error } objects
   assetsProcessed Int   @default(0)
+  assetsCreated   Int   @default(0)
+  assetsUpdated   Int   @default(0)
   createdAt   DateTime @default(now())
 
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)

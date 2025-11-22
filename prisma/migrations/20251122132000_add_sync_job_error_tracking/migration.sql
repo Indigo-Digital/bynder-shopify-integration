@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "SyncJob" ADD COLUMN "errors" TEXT;
+ALTER TABLE "SyncJob" ADD COLUMN "assetsCreated" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "SyncJob" ADD COLUMN "assetsUpdated" INTEGER NOT NULL DEFAULT 0;
+

@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import prisma from "../db.server.js";
@@ -65,10 +65,12 @@ export default function SyncDashboard() {
 			// Wait a bit for the sync job to be saved, then reload
 			const timer = setTimeout(() => {
 				revalidator.revalidate();
-			}, 1000);
+			}, 500);
 			return () => clearTimeout(timer);
 		}
 	}, [fetcher.state, fetcher.data, revalidator]);
+
+	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
 
 	const showSuccess =
 		fetcher.data && "success" in fetcher.data && fetcher.data.success;
@@ -92,7 +94,13 @@ export default function SyncDashboard() {
 	return (
 		<s-page heading="Sync Dashboard">
 			{syncResult && showSuccess && (
-				<s-banner tone="success">
+				<s-banner
+					tone={
+						syncResult.errors !== undefined && syncResult.errors.length > 0
+							? "warning"
+							: "success"
+					}
+				>
 					Sync completed!{" "}
 					{syncResult.processed !== undefined && (
 						<>
@@ -112,9 +120,13 @@ export default function SyncDashboard() {
 							updated.{" "}
 						</>
 					)}
-					{syncResult.errors !== undefined &&
-						syncResult.errors.length > 0 &&
-						`${syncResult.errors.length} error${syncResult.errors.length !== 1 ? "s" : ""} occurred.`}
+					{syncResult.errors !== undefined && syncResult.errors.length > 0 && (
+						<>
+							{syncResult.errors.length} error
+							{syncResult.errors.length !== 1 ? "s" : ""} occurred. Click on the
+							job in the table below to see details.
+						</>
+					)}
 				</s-banner>
 			)}
 
@@ -232,7 +244,25 @@ export default function SyncDashboard() {
 											fontWeight: "600",
 										}}
 									>
-										Assets Found
+										Found
+									</th>
+									<th
+										style={{
+											padding: "0.75rem",
+											textAlign: "right",
+											fontWeight: "600",
+										}}
+									>
+										Created
+									</th>
+									<th
+										style={{
+											padding: "0.75rem",
+											textAlign: "right",
+											fontWeight: "600",
+										}}
+									>
+										Updated
 									</th>
 									<th
 										style={{
@@ -241,7 +271,7 @@ export default function SyncDashboard() {
 											fontWeight: "600",
 										}}
 									>
-										Error
+										Errors
 									</th>
 								</tr>
 							</thead>
@@ -299,20 +329,143 @@ export default function SyncDashboard() {
 													"-"
 												)}
 											</td>
-											<td style={{ padding: "0.75rem", maxWidth: "300px" }}>
-												{job.error ? (
-													<span
-														style={{
-															color: "#721c24",
-															fontSize: "0.8125rem",
-															wordBreak: "break-word",
-														}}
-													>
-														{job.error}
+											<td style={{ padding: "0.75rem", textAlign: "right" }}>
+												{job.assetsCreated !== undefined &&
+												job.assetsCreated > 0 ? (
+													<span style={{ color: "#155724", fontWeight: "600" }}>
+														{job.assetsCreated}
 													</span>
 												) : (
 													<span style={{ color: "#999" }}>-</span>
 												)}
+											</td>
+											<td style={{ padding: "0.75rem", textAlign: "right" }}>
+												{job.assetsUpdated !== undefined &&
+												job.assetsUpdated > 0 ? (
+													<span style={{ color: "#856404", fontWeight: "600" }}>
+														{job.assetsUpdated}
+													</span>
+												) : (
+													<span style={{ color: "#999" }}>-</span>
+												)}
+											</td>
+											<td style={{ padding: "0.75rem", maxWidth: "400px" }}>
+												{(() => {
+													// Parse errors from JSON or use error field
+													let errorList: Array<{
+														assetId: string;
+														error: string;
+													}> = [];
+													if (job.errors) {
+														try {
+															errorList = JSON.parse(job.errors);
+														} catch {
+															// If parsing fails, ignore
+														}
+													}
+													const hasErrors = errorList.length > 0 || job.error;
+
+													if (!hasErrors) {
+														return <span style={{ color: "#999" }}>-</span>;
+													}
+
+													const errorCount =
+														errorList.length || (job.error ? 1 : 0);
+													const isExpanded = expandedErrors.has(job.id);
+
+													return (
+														<div>
+															<button
+																type="button"
+																onClick={() => {
+																	const newExpanded = new Set(expandedErrors);
+																	if (isExpanded) {
+																		newExpanded.delete(job.id);
+																	} else {
+																		newExpanded.add(job.id);
+																	}
+																	setExpandedErrors(newExpanded);
+																}}
+																style={{
+																	background: "none",
+																	border: "none",
+																	color: "#721c24",
+																	cursor: "pointer",
+																	padding: "0.25rem 0.5rem",
+																	fontSize: "0.875rem",
+																	fontWeight: "600",
+																	textDecoration: "underline",
+																}}
+															>
+																{errorCount} error{errorCount !== 1 ? "s" : ""}
+																{isExpanded ? " ▼" : " ▶"}
+															</button>
+															{isExpanded && (
+																<div
+																	style={{
+																		marginTop: "0.5rem",
+																		padding: "0.75rem",
+																		backgroundColor: "#f8d7da",
+																		borderRadius: "4px",
+																		border: "1px solid #f5c6cb",
+																	}}
+																>
+																	{job.error && (
+																		<div
+																			style={{
+																				marginBottom:
+																					errorList.length > 0 ? "0.5rem" : "0",
+																				paddingBottom:
+																					errorList.length > 0 ? "0.5rem" : "0",
+																				borderBottom:
+																					errorList.length > 0
+																						? "1px solid #f5c6cb"
+																						: "none",
+																			}}
+																		>
+																			<strong>General Error:</strong>
+																			<div
+																				style={{
+																					marginTop: "0.25rem",
+																					fontSize: "0.8125rem",
+																					wordBreak: "break-word",
+																				}}
+																			>
+																				{job.error}
+																			</div>
+																		</div>
+																	)}
+																	{errorList.length > 0 && (
+																		<div>
+																			<strong>Asset Errors:</strong>
+																			<ul
+																				style={{
+																					margin: "0.5rem 0 0 0",
+																					paddingLeft: "1.5rem",
+																				}}
+																			>
+																				{errorList.map((err) => (
+																					<li
+																						key={err.assetId}
+																						style={{
+																							marginBottom: "0.5rem",
+																							fontSize: "0.8125rem",
+																						}}
+																					>
+																						<strong>
+																							Asset {err.assetId}:
+																						</strong>{" "}
+																						{err.error}
+																					</li>
+																				))}
+																			</ul>
+																		</div>
+																	)}
+																</div>
+															)}
+														</div>
+													);
+												})()}
 											</td>
 										</tr>
 									)

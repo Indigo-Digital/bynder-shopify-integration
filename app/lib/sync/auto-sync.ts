@@ -145,13 +145,16 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 			}
 		}
 
-		// Update sync job
+		// Update sync job with results
 		await prisma.syncJob.update({
 			where: { id: syncJob.id },
 			data: {
 				status: "completed",
 				completedAt: new Date(),
 				assetsProcessed: allAssets.length,
+				assetsCreated: created,
+				assetsUpdated: updated,
+				errors: errors.length > 0 ? JSON.stringify(errors) : null,
 			},
 		});
 

@@ -252,13 +252,29 @@ export async function uploadBynderAsset(
 	}
 
 	// Add the file last - this is critical for S3 uploads
-	// Use File for Node.js 18+ FormData (which is now standard)
-	// File is more appropriate than Blob for file uploads as it has a name property
-	const uint8Array = new Uint8Array(buffer);
-	const uploadFile = new File([uint8Array], sanitizedStagedFilename, {
-		type: contentType,
-	});
-	formData.append("file", uploadFile);
+	// Detect if we're using form-data package (production) or native FormData
+	// form-data package supports buffers directly, native FormData can use File/Blob
+	// biome-ignore lint/suspicious/noExplicitAny: form-data package has non-standard properties
+	const formDataAny = formData as any;
+	const isFormDataPackage =
+		typeof formDataAny._boundary !== "undefined" ||
+		typeof formDataAny.getBoundary === "function" ||
+		typeof formDataAny._streams !== "undefined";
+
+	if (isFormDataPackage) {
+		// form-data package (production) - supports buffers directly
+		formDataAny.append("file", buffer, {
+			filename: sanitizedStagedFilename,
+			contentType: contentType,
+		});
+	} else {
+		// Native FormData (Node.js 18+) - use File
+		const uint8Array = new Uint8Array(buffer);
+		const uploadFile = new File([uint8Array], sanitizedStagedFilename, {
+			type: contentType,
+		});
+		formData.append("file", uploadFile);
+	}
 
 	// Upload to staged URL - DO NOT set Content-Type header manually
 	// fetch will automatically set it with the correct boundary for multipart/form-data

@@ -122,9 +122,8 @@ describe("uploadBynderAsset", () => {
 		expect(stagedUploadCall).toBeDefined();
 		const stagedUploadVariables = stagedUploadCall?.[1]?.variables;
 		expect(stagedUploadVariables?.input?.[0]?.resource).toBe("IMAGE");
-		expect(stagedUploadVariables?.input?.[0]?.filename).toMatch(
-			/^campaigns\/campaign-summer\/test-image\.jpg$/
-		);
+		// Staged upload should use just the filename, not the full path
+		expect(stagedUploadVariables?.input?.[0]?.filename).toBe("test-image.jpg");
 
 		// Verify fileCreate was called with resourceUrl
 		const fileCreateCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>).mock
@@ -227,7 +226,15 @@ describe("uploadBynderAsset", () => {
 			.mock.calls[0];
 		expect(stagedUploadCall).toBeDefined();
 		const stagedUploadVariables = stagedUploadCall?.[1]?.variables;
-		expect(stagedUploadVariables?.input?.[0]?.filename).toMatch(
+		// Staged upload should use just the filename, not the full path
+		expect(stagedUploadVariables?.input?.[0]?.filename).toBe("test-image.jpg");
+
+		// Verify fileCreate uses the full path
+		const fileCreateCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>).mock
+			.calls[1];
+		expect(fileCreateCall).toBeDefined();
+		const fileCreateVariables = fileCreateCall?.[1]?.variables;
+		expect(fileCreateVariables?.files?.[0]?.filename).toMatch(
 			/^campaigns\/shopify-sync\/test-image\.jpg$/
 		);
 	});

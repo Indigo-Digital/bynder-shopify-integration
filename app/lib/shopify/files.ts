@@ -170,6 +170,23 @@ export async function uploadBynderAsset(
 	const originalFilename = assetInfo.name || `bynder-${assetId}`;
 	const fileName = generateFileName(originalFilename, assetInfo.tags || []);
 
+	// Extract just the filename (without path) for staged upload
+	// Shopify's stagedUploadsCreate expects only a filename, not a path
+	const stagedUploadFilename = fileName.includes("/")
+		? fileName.split("/").pop() || originalFilename
+		: fileName;
+
+	// Sanitize the filename for staged upload
+	// Shopify has restrictions on filenames - remove invalid characters
+	// Remove colons, trailing spaces, and other problematic characters
+	const sanitizedStagedFilename =
+		stagedUploadFilename
+			.replace(/:/g, "-") // Replace colons with dashes
+			.replace(/\s+$/g, "") // Remove trailing spaces
+			.replace(/^\s+/g, "") // Remove leading spaces
+			.trim() || // Final trim
+		originalFilename; // Fallback to original if empty after sanitization
+
 	// Determine resource type based on content type
 	// Use IMAGE for image types, FILE for everything else
 	const isImage = contentType.startsWith("image/");
@@ -200,7 +217,7 @@ export async function uploadBynderAsset(
 				input: [
 					{
 						resource: resourceType,
-						filename: fileName,
+						filename: sanitizedStagedFilename,
 						mimeType: contentType,
 					},
 				],

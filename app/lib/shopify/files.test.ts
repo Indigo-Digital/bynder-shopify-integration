@@ -20,6 +20,7 @@ describe("uploadBynderAsset", () => {
 		getMediaDownloadUrl: vi.fn(),
 		config: {
 			baseURL: "https://test.bynder.com/api",
+			permanentToken: "test-token",
 		},
 	} as unknown as BynderClient;
 
@@ -58,7 +59,7 @@ describe("uploadBynderAsset", () => {
 		(mockAdmin.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
 			json: async () => ({
 				data: {
-					filesCreate: {
+					fileCreate: {
 						files: [
 							{
 								id: "gid://shopify/File/123",
@@ -122,7 +123,7 @@ describe("uploadBynderAsset", () => {
 		(mockAdmin.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
 			json: async () => ({
 				data: {
-					filesCreate: {
+					fileCreate: {
 						files: [
 							{
 								id: "gid://shopify/File/456",

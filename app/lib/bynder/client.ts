@@ -51,6 +51,7 @@ export class BynderClient {
 	/**
 	 * Create client using permanent token from environment variables
 	 * Requires baseURL (typically from shop config) and uses env vars for token/credentials
+	 * Automatically appends /api to the baseURL if not present
 	 */
 	static createFromEnv(baseURL: string): BynderClient {
 		if (!env.BYNDER_PERMANENT_TOKEN) {
@@ -63,8 +64,18 @@ export class BynderClient {
 				"BYNDER_CLIENT_ID and BYNDER_CLIENT_SECRET environment variables are required"
 			);
 		}
+
+		// Normalize baseURL: ensure it ends with /api
+		let normalizedBaseURL = baseURL.trim();
+		// Remove trailing slash
+		normalizedBaseURL = normalizedBaseURL.replace(/\/$/, "");
+		// Append /api if not present
+		if (!normalizedBaseURL.endsWith("/api")) {
+			normalizedBaseURL = `${normalizedBaseURL}/api`;
+		}
+
 		return BynderClient.createPermanentTokenClient({
-			baseURL,
+			baseURL: normalizedBaseURL,
 			permanentToken: env.BYNDER_PERMANENT_TOKEN,
 			clientId: env.BYNDER_CLIENT_ID,
 			clientSecret: env.BYNDER_CLIENT_SECRET,
@@ -185,11 +196,14 @@ export class BynderClient {
 		}
 
 		// Fallback: construct download URL based on Bynder API
-		const baseUrl = this.config.baseURL.replace("/api", "");
+		// baseURL now includes /api, so we use it directly and append the path
+		const baseUrl = this.config.baseURL.endsWith("/api")
+			? this.config.baseURL
+			: `${this.config.baseURL.replace(/\/api$/, "")}/api`;
 		if (params.itemId) {
-			return `${baseUrl}/api/v4/media/${params.id}/download/${params.itemId}`;
+			return `${baseUrl}/v4/media/${params.id}/download/${params.itemId}`;
 		}
-		return `${baseUrl}/api/v4/media/${params.id}/download`;
+		return `${baseUrl}/v4/media/${params.id}/download`;
 	}
 
 	/**

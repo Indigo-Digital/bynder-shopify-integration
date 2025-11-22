@@ -100,9 +100,12 @@ export async function uploadBynderAsset(
 	}
 
 	// Final fallback: construct URL
+	// baseURL now includes /api, so we use it directly and append the path
 	if (!downloadUrl) {
-		const baseUrl = bynderClient.config.baseURL.replace("/api", "");
-		downloadUrl = `${baseUrl}/api/v4/media/${assetId}/download`;
+		const baseUrl = bynderClient.config.baseURL.endsWith("/api")
+			? bynderClient.config.baseURL
+			: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
+		downloadUrl = `${baseUrl}/v4/media/${assetId}/download`;
 	}
 
 	// Download the file
@@ -169,9 +172,11 @@ export async function uploadBynderAsset(
 	const fileUrl = file.image?.url || file.url || "";
 
 	// Set metafields
+	// For permalink, we want the portal URL (without /api)
+	const portalUrl = bynderClient.config.baseURL.replace(/\/api$/, "");
 	await setBynderMetafields(admin, fileId, {
 		assetId,
-		permalink: `${bynderClient.config.baseURL.replace("/api", "")}/media/${assetId}`,
+		permalink: `${portalUrl}/media/${assetId}`,
 		tags: assetInfo.tags || [],
 		version: assetInfo.version || 1,
 		syncedAt: new Date().toISOString(),

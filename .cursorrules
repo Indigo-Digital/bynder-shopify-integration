@@ -48,6 +48,13 @@
 - Store tokens in database per shop
 - Support configurable sync tags (comma-separated)
 
+**CRITICAL: Bynder Assets are READ-ONLY**
+- **NEVER** create, update, modify, or delete assets in Bynder
+- **ONLY** use read operations: `getMediaList`, `getMediaInfo`, `getMediaDownloadUrl`, `getAllMediaItems`
+- This integration is one-way: Bynder → Shopify (read from Bynder, write to Shopify)
+- If you need to modify assets, do it directly in Bynder's interface, not through this integration
+- Any code that attempts to modify Bynder assets will be rejected
+
 ### Shopify Integration
 - All assets go to Shopify Files (never product images)
 - Store Bynder metadata in metafields for traceability

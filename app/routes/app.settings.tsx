@@ -2,6 +2,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { redirect, useFetcher, useLoaderData } from "react-router";
+import { AssetBrowser } from "../components/AssetBrowser.js";
 import prisma from "../db.server.js";
 import { authenticate } from "../shopify.server.js";
 
@@ -145,6 +146,7 @@ export default function SettingsPage() {
 		shopConfig?.bynderBaseUrl || ""
 	);
 	const [newTag, setNewTag] = useState("");
+	const [activeTab, setActiveTab] = useState<"config" | "browse">("config");
 
 	const isSubmitting = fetcher.state !== "idle";
 	const isTesting = testFetcher.state !== "idle";
@@ -173,6 +175,16 @@ export default function SettingsPage() {
 			tagList.filter((tag: string) => tag !== tagToRemove).join(",") ||
 			"shopify-sync";
 		setSyncTags(updatedTags);
+	};
+
+	const handleTagSelectFromBrowser = (tag: string) => {
+		const trimmed = tag.trim();
+		if (trimmed && !tagList.includes(trimmed)) {
+			const updatedTags = [...tagList, trimmed].join(",");
+			setSyncTags(updatedTags);
+			// Optionally switch to config tab to show the newly added tag
+			setActiveTab("config");
+		}
 	};
 
 	const handleTestConnection = () => {
@@ -219,11 +231,13 @@ export default function SettingsPage() {
 										}
 									}}
 									name="bynderBaseUrl"
-									placeholder="https://portal.getbynder.com"
+									placeholder="https://portal.getbynder.com/api"
 									required
 								/>
 								<s-text>
-									Your Bynder portal URL (e.g., https://portal.getbynder.com)
+									Your Bynder portal URL with /api (e.g.,
+									https://portal.getbynder.com/api). The /api will be added
+									automatically if not included.
 								</s-text>
 							</s-stack>
 							<s-button type="submit" disabled={isSubmitting}>
@@ -329,73 +343,118 @@ export default function SettingsPage() {
 
 			{/* Tag Management Section */}
 			<s-section heading="Sync Tag Configuration">
-				<fetcher.Form method="POST">
-					<input type="hidden" name="intent" value="update_sync_tags" />
-					<input type="hidden" name="syncTags" value={syncTags} />
-					<s-stack direction="block" gap="base">
-						<s-paragraph>
-							Assets with these tags will be automatically synced to Shopify
-							Files. You can add multiple tags.
-						</s-paragraph>
-
-						{/* Tag Input */}
-						<s-stack direction="inline" gap="base">
-							<s-text-field
-								label="Add Tag"
-								value={newTag}
-								onChange={(e) => {
-									const target = e.currentTarget;
-									if (target) {
-										setNewTag(target.value);
-									}
-								}}
-								placeholder="Enter tag name"
-							/>
-							<s-button
-								type="button"
-								variant="secondary"
-								onClick={handleAddTag}
-								disabled={!newTag.trim()}
-							>
-								Add
-							</s-button>
-						</s-stack>
-
-						{/* Tag List */}
-						{tagList.length > 0 && (
-							<s-stack direction="block" gap="base">
-								<s-text>
-									<strong>Active Tags ({tagList.length}):</strong>
-								</s-text>
-								<s-stack direction="inline" gap="base">
-									{tagList.map((tag: string) => (
-										<s-box
-											key={tag}
-											padding="base"
-											borderWidth="base"
-											borderRadius="base"
-										>
-											<s-stack direction="inline" gap="base">
-												<s-text>{tag}</s-text>
-												<s-button
-													type="button"
-													variant="tertiary"
-													onClick={() => handleRemoveTag(tag)}
-												>
-													×
-												</s-button>
-											</s-stack>
-										</s-box>
-									))}
-								</s-stack>
-							</s-stack>
-						)}
-
-						<s-button type="submit" disabled={isSubmitting}>
-							{isSubmitting ? "Saving..." : "Save Tags"}
+				<s-stack direction="block" gap="base">
+					{/* Tab Navigation */}
+					<s-stack direction="inline" gap="base">
+						<s-button
+							variant={activeTab === "config" ? "primary" : "secondary"}
+							onClick={() => setActiveTab("config")}
+						>
+							Configure Tags
+						</s-button>
+						<s-button
+							variant={activeTab === "browse" ? "primary" : "secondary"}
+							onClick={() => setActiveTab("browse")}
+							disabled={!shopConfig?.bynderBaseUrl}
+						>
+							Browse Assets
 						</s-button>
 					</s-stack>
-				</fetcher.Form>
+
+					{/* Configuration Tab */}
+					{activeTab === "config" && (
+						<fetcher.Form method="POST">
+							<input type="hidden" name="intent" value="update_sync_tags" />
+							<input type="hidden" name="syncTags" value={syncTags} />
+							<s-stack direction="block" gap="base">
+								<s-paragraph>
+									Assets with these tags will be automatically synced to Shopify
+									Files. You can add multiple tags.
+								</s-paragraph>
+
+								{/* Tag Input */}
+								<s-stack direction="inline" gap="base">
+									<s-text-field
+										label="Add Tag"
+										value={newTag}
+										onChange={(e) => {
+											const target = e.currentTarget;
+											if (target) {
+												setNewTag(target.value);
+											}
+										}}
+										placeholder="Enter tag name"
+									/>
+									<s-button
+										type="button"
+										variant="secondary"
+										onClick={handleAddTag}
+										disabled={!newTag.trim()}
+									>
+										Add
+									</s-button>
+								</s-stack>
+
+								{/* Tag List */}
+								{tagList.length > 0 && (
+									<s-stack direction="block" gap="base">
+										<s-text>
+											<strong>Active Tags ({tagList.length}):</strong>
+										</s-text>
+										<s-stack direction="inline" gap="base">
+											{tagList.map((tag: string) => (
+												<s-box
+													key={tag}
+													padding="base"
+													borderWidth="base"
+													borderRadius="base"
+												>
+													<s-stack direction="inline" gap="base">
+														<s-text>{tag}</s-text>
+														<s-button
+															type="button"
+															variant="tertiary"
+															onClick={() => handleRemoveTag(tag)}
+														>
+															×
+														</s-button>
+													</s-stack>
+												</s-box>
+											))}
+										</s-stack>
+									</s-stack>
+								)}
+
+								<s-button type="submit" disabled={isSubmitting}>
+									{isSubmitting ? "Saving..." : "Save Tags"}
+								</s-button>
+							</s-stack>
+						</fetcher.Form>
+					)}
+
+					{/* Browse Assets Tab */}
+					{activeTab === "browse" && (
+						<s-stack direction="block" gap="base">
+							{!shopConfig?.bynderBaseUrl ? (
+								<s-banner tone="warning">
+									Please configure your Bynder Base URL first to browse assets.
+								</s-banner>
+							) : (
+								<>
+									<s-paragraph>
+										Browse your Bynder assets to discover tags. Click on any tag
+										to add it to your sync configuration.
+									</s-paragraph>
+									<AssetBrowser
+										onTagSelect={handleTagSelectFromBrowser}
+										existingTags={tagList}
+										baseUrl={shopConfig.bynderBaseUrl}
+									/>
+								</>
+							)}
+						</s-stack>
+					)}
+				</s-stack>
 			</s-section>
 		</s-page>
 	);

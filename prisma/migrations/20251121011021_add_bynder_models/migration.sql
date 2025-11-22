@@ -4,11 +4,11 @@ CREATE TABLE "Shop" (
     "shop" TEXT NOT NULL,
     "bynderAccessToken" TEXT,
     "bynderRefreshToken" TEXT,
-    "bynderTokenExpires" DATETIME,
+    "bynderTokenExpires" TIMESTAMP(3),
     "bynderBaseUrl" TEXT,
     "syncTags" TEXT NOT NULL DEFAULT 'shopify-sync',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 -- CreateTable
@@ -20,8 +20,8 @@ CREATE TABLE "SyncedAsset" (
     "syncType" TEXT NOT NULL,
     "bynderTags" TEXT,
     "bynderVersion" INTEGER,
-    "syncedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "syncedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "SyncedAsset_shopId_fkey" FOREIGN KEY ("shopId") REFERENCES "Shop" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -33,7 +33,7 @@ CREATE TABLE "WebhookSubscription" (
     "eventType" TEXT NOT NULL,
     "endpoint" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "WebhookSubscription_shopId_fkey" FOREIGN KEY ("shopId") REFERENCES "Shop" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -42,11 +42,11 @@ CREATE TABLE "SyncJob" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "shopId" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "startedAt" DATETIME,
-    "completedAt" DATETIME,
+    "startedAt" TIMESTAMP(3),
+    "completedAt" TIMESTAMP(3),
     "error" TEXT,
     "assetsProcessed" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "SyncJob_shopId_fkey" FOREIGN KEY ("shopId") REFERENCES "Shop" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 

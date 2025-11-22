@@ -20,6 +20,8 @@ COPY . .
 RUN cp prisma/schema.postgresql.prisma prisma/schema.prisma
 # Update migration lock to PostgreSQL for production
 RUN echo 'provider = "postgresql"' > prisma/migrations/migration_lock.toml
+# Make setup script executable
+RUN chmod +x scripts/setup-db.sh
 
 RUN pnpm run build
 

@@ -251,8 +251,15 @@ export async function uploadBynderAsset(
 	// For Shopify staged uploads (typically S3), we need to:
 	// 1. Add all parameters first (in order)
 	// 2. Add the file last
-	// 3. Use native FormData (Node.js 20+)
+	// 3. Handle both native FormData and form-data polyfill
+	// Note: @bynder/bynder-js-sdk pulls in isomorphic-form-data which polyfills FormData
+	// The polyfill expects streams/buffers, not File objects
 	const formData = new FormData();
+
+	// Detect if we're using the form-data polyfill (has _boundary property) vs native FormData
+	const isPolyfill =
+		"_boundary" in formData ||
+		typeof (formData as { _streams?: unknown })._streams !== "undefined";
 
 	// Add parameters from staged upload first (S3 requires specific order)
 	for (const param of stagedTarget.parameters) {
@@ -260,23 +267,51 @@ export async function uploadBynderAsset(
 	}
 
 	// Add the file last - this is critical for S3 uploads
-	// Convert Buffer to File for native FormData (Node.js 20+)
-	// Convert Buffer to Uint8Array to ensure proper type compatibility
-	const fileToUpload = new File(
-		[new Uint8Array(buffer)],
-		sanitizedStagedFilename,
-		{
-			type: contentType,
-		}
-	);
-	formData.append("file", fileToUpload);
+	if (isPolyfill) {
+		// form-data polyfill expects Buffer or stream, not File
+		// Type assertion needed because form-data polyfill has different signature
+		const polyfillFormData = formData as unknown as {
+			append: (
+				name: string,
+				value: Buffer,
+				options?: { filename?: string; contentType?: string }
+			) => void;
+		};
+		polyfillFormData.append("file", buffer, {
+			filename: sanitizedStagedFilename,
+			contentType: contentType,
+		});
+	} else {
+		// Native FormData (Node.js 20+) supports File objects
+		const fileToUpload = new File(
+			[new Uint8Array(buffer)],
+			sanitizedStagedFilename,
+			{
+				type: contentType,
+			}
+		);
+		formData.append("file", fileToUpload);
+	}
 
 	// Upload to staged URL
 	// Native FormData: fetch will automatically set Content-Type with boundary
-	const uploadResponse = await fetch(stagedTarget.url, {
+	// form-data polyfill: need to get headers manually
+	const uploadOptions: RequestInit = {
 		method: "POST",
-		body: formData,
-	});
+		body: formData as unknown as BodyInit,
+	};
+
+	if (isPolyfill) {
+		// form-data polyfill provides getHeaders() method
+		const polyfillFormData = formData as unknown as {
+			getHeaders?: () => HeadersInit;
+		};
+		if (typeof polyfillFormData.getHeaders === "function") {
+			uploadOptions.headers = polyfillFormData.getHeaders();
+		}
+	}
+
+	const uploadResponse = await fetch(stagedTarget.url, uploadOptions);
 
 	if (!uploadResponse.ok) {
 		const statusText = uploadResponse.statusText || "Unknown error";

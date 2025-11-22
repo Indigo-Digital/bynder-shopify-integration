@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
 import type { AdminApi } from "../types.js";
@@ -245,13 +246,30 @@ export async function uploadBynderAsset(
 	for (const param of stagedTarget.parameters) {
 		formData.append(param.name, param.value);
 	}
-	// Add the file - create a Blob from buffer for FormData compatibility
-	// Convert Buffer to Uint8Array for Blob constructor
-	const uint8Array = new Uint8Array(buffer);
-	const fileBlob = new File([uint8Array], sanitizedStagedFilename, {
-		type: contentType,
-	});
-	formData.append("file", fileBlob);
+	// Add the file - use stream for form-data package compatibility
+	// The form-data package (used by fetch in Node.js) expects streams with .on() method
+	// Check if FormData is from form-data package by checking for _boundary property
+	// biome-ignore lint/suspicious/noExplicitAny: form-data package has non-standard properties
+	const formDataAny = formData as any;
+	const isFormDataPackage =
+		typeof formDataAny._boundary !== "undefined" ||
+		typeof formDataAny.getBoundary === "function";
+
+	if (isFormDataPackage) {
+		// form-data package - use stream
+		const bufferStream = Readable.from(buffer);
+		formDataAny.append("file", bufferStream, {
+			filename: sanitizedStagedFilename,
+			contentType: contentType,
+		});
+	} else {
+		// Standard FormData (jsdom/browser) - use File/Blob
+		const uint8Array = new Uint8Array(buffer);
+		const fileBlob = new File([uint8Array], sanitizedStagedFilename, {
+			type: contentType,
+		});
+		formData.append("file", fileBlob);
+	}
 
 	const uploadResponse = await fetch(stagedTarget.url, {
 		method: "POST",

@@ -46,8 +46,12 @@ describe("uploadBynderAsset", () => {
 				"https://test.bynder.com/api/v4/media/test-asset-123/download"
 			);
 
-		// Mock file download
-		global.fetch = vi.fn().mockResolvedValue({
+		// Mock file download from Bynder
+		const mockFetch = vi.fn();
+		global.fetch = mockFetch;
+
+		// First fetch: Download from Bynder
+		mockFetch.mockResolvedValueOnce({
 			ok: true,
 			arrayBuffer: async () => new ArrayBuffer(8),
 			headers: {
@@ -55,25 +59,53 @@ describe("uploadBynderAsset", () => {
 			},
 		});
 
-		// Mock Shopify GraphQL response
-		(mockAdmin.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
-			json: async () => ({
-				data: {
-					fileCreate: {
-						files: [
-							{
-								id: "gid://shopify/File/123",
-								fileStatus: "READY",
-								image: {
-									url: "https://cdn.shopify.com/test.jpg",
-								},
-							},
-						],
-						userErrors: [],
-					},
-				},
-			}),
+		// Second fetch: Upload to staged URL
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
 		});
+
+		// Mock Shopify GraphQL responses
+		// First call: stagedUploadsCreate
+		// Second call: fileCreate
+		(mockAdmin.graphql as ReturnType<typeof vi.fn>)
+			.mockResolvedValueOnce({
+				json: async () => ({
+					data: {
+						stagedUploadsCreate: {
+							stagedTargets: [
+								{
+									resourceUrl:
+										"https://shopify.com/staged-upload/resource-url",
+									url: "https://shopify.com/staged-upload/upload-url",
+									parameters: [
+										{ name: "key", value: "test-key" },
+										{ name: "policy", value: "test-policy" },
+									],
+								},
+							],
+							userErrors: [],
+						},
+					},
+				}),
+			})
+			.mockResolvedValueOnce({
+				json: async () => ({
+					data: {
+						fileCreate: {
+							files: [
+								{
+									id: "gid://shopify/File/123",
+									fileStatus: "READY",
+									image: {
+										url: "https://cdn.shopify.com/test.jpg",
+									},
+								},
+							],
+							userErrors: [],
+						},
+					},
+				}),
+			});
 
 		const result = await uploadBynderAsset(
 			mockAdmin,
@@ -83,15 +115,25 @@ describe("uploadBynderAsset", () => {
 		);
 
 		expect(result.fileId).toBe("gid://shopify/File/123");
-		expect(mockAdmin.graphql).toHaveBeenCalled();
+		expect(mockAdmin.graphql).toHaveBeenCalledTimes(2);
 
-		// Verify file name follows campaigns/{tag}/{filename} convention
-		const graphqlCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>).mock
-			.calls[0];
-		expect(graphqlCall).toBeDefined();
-		const variables = graphqlCall?.[1]?.variables;
-		expect(variables?.files?.[0]?.filename).toMatch(
+		// Verify staged upload was called with correct resource type
+		const stagedUploadCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>)
+			.mock.calls[0];
+		expect(stagedUploadCall).toBeDefined();
+		const stagedUploadVariables = stagedUploadCall?.[1]?.variables;
+		expect(stagedUploadVariables?.input?.[0]?.resource).toBe("IMAGE");
+		expect(stagedUploadVariables?.input?.[0]?.filename).toMatch(
 			/^campaigns\/campaign-summer\/test-image\.jpg$/
+		);
+
+		// Verify fileCreate was called with resourceUrl
+		const fileCreateCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>)
+			.mock.calls[1];
+		expect(fileCreateCall).toBeDefined();
+		const fileCreateVariables = fileCreateCall?.[1]?.variables;
+		expect(fileCreateVariables?.files?.[0]?.originalSource).toBe(
+			"https://shopify.com/staged-upload/resource-url"
 		);
 	});
 
@@ -112,7 +154,12 @@ describe("uploadBynderAsset", () => {
 				"https://test.bynder.com/api/v4/media/test-asset-456/download"
 			);
 
-		global.fetch = vi.fn().mockResolvedValue({
+		// Mock file download from Bynder
+		const mockFetch = vi.fn();
+		global.fetch = mockFetch;
+
+		// First fetch: Download from Bynder
+		mockFetch.mockResolvedValueOnce({
 			ok: true,
 			arrayBuffer: async () => new ArrayBuffer(8),
 			headers: {
@@ -120,24 +167,53 @@ describe("uploadBynderAsset", () => {
 			},
 		});
 
-		(mockAdmin.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
-			json: async () => ({
-				data: {
-					fileCreate: {
-						files: [
-							{
-								id: "gid://shopify/File/456",
-								fileStatus: "READY",
-								image: {
-									url: "https://cdn.shopify.com/test.jpg",
-								},
-							},
-						],
-						userErrors: [],
-					},
-				},
-			}),
+		// Second fetch: Upload to staged URL
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
 		});
+
+		// Mock Shopify GraphQL responses
+		// First call: stagedUploadsCreate
+		// Second call: fileCreate
+		(mockAdmin.graphql as ReturnType<typeof vi.fn>)
+			.mockResolvedValueOnce({
+				json: async () => ({
+					data: {
+						stagedUploadsCreate: {
+							stagedTargets: [
+								{
+									resourceUrl:
+										"https://shopify.com/staged-upload/resource-url",
+									url: "https://shopify.com/staged-upload/upload-url",
+									parameters: [
+										{ name: "key", value: "test-key" },
+										{ name: "policy", value: "test-policy" },
+									],
+								},
+							],
+							userErrors: [],
+						},
+					},
+				}),
+			})
+			.mockResolvedValueOnce({
+				json: async () => ({
+					data: {
+						fileCreate: {
+							files: [
+								{
+									id: "gid://shopify/File/456",
+									fileStatus: "READY",
+									image: {
+										url: "https://cdn.shopify.com/test.jpg",
+									},
+								},
+							],
+							userErrors: [],
+						},
+					},
+				}),
+			});
 
 		const result = await uploadBynderAsset(
 			mockAdmin,
@@ -149,11 +225,11 @@ describe("uploadBynderAsset", () => {
 		expect(result.fileId).toBe("gid://shopify/File/456");
 
 		// Should use default tag when no tags provided
-		const graphqlCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>).mock
-			.calls[0];
-		expect(graphqlCall).toBeDefined();
-		const variables = graphqlCall?.[1]?.variables;
-		expect(variables?.files?.[0]?.filename).toMatch(
+		const stagedUploadCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>)
+			.mock.calls[0];
+		expect(stagedUploadCall).toBeDefined();
+		const stagedUploadVariables = stagedUploadCall?.[1]?.variables;
+		expect(stagedUploadVariables?.input?.[0]?.filename).toMatch(
 			/^campaigns\/shopify-sync\/test-image\.jpg$/
 		);
 	});

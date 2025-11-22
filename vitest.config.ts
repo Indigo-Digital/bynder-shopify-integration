@@ -17,6 +17,8 @@ export default defineConfig({
 			"**/node_modules/**",
 			// Exclude route handler files (but not test files in __tests__)
 			"app/routes/**/!(*.test|*.spec).{ts,tsx}",
+			// Exclude route handlers that have .test in name but are actual route handlers
+			"app/routes/api.bynder.test.tsx",
 		],
 		coverage: {
 			provider: "v8",

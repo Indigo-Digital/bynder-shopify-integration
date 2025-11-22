@@ -244,6 +244,7 @@ export async function uploadBynderAsset(
 	// 1. Add all parameters first (in order)
 	// 2. Add the file last
 	// 3. NOT set Content-Type header manually (let fetch set it with boundary)
+	// Use native FormData if available (Node.js 18+), otherwise form-data package will be used
 	const formData = new FormData();
 
 	// Add parameters from staged upload first (S3 requires specific order)
@@ -252,45 +253,21 @@ export async function uploadBynderAsset(
 	}
 
 	// Add the file last - this is critical for S3 uploads
-	// Detect if we're using form-data package (production) or native FormData
-	// form-data package supports buffers directly, native FormData can use File/Blob
-	// biome-ignore lint/suspicious/noExplicitAny: form-data package has non-standard properties
-	const formDataAny = formData as any;
-	const isFormDataPackage =
-		typeof formDataAny._boundary !== "undefined" ||
-		typeof formDataAny.getBoundary === "function" ||
-		typeof formDataAny._streams !== "undefined";
-
-	if (isFormDataPackage) {
-		// form-data package (production) - supports buffers directly
-		formDataAny.append("file", buffer, {
-			filename: sanitizedStagedFilename,
-			contentType: contentType,
-		});
-	} else {
-		// Native FormData (Node.js 18+) - use File
-		const uint8Array = new Uint8Array(buffer);
-		const uploadFile = new File([uint8Array], sanitizedStagedFilename, {
-			type: contentType,
-		});
-		formData.append("file", uploadFile);
-	}
+	// Always use native FormData (Node.js 18+ required)
+	// Convert buffer to File for native FormData
+	const uint8Array = new Uint8Array(buffer);
+	const uploadFile = new File([uint8Array], sanitizedStagedFilename, {
+		type: contentType,
+	});
+	formData.append("file", uploadFile);
 
 	// Upload to staged URL
-	// For form-data package, we need to use getHeaders() to get proper Content-Type with boundary
-	// For native FormData, fetch will automatically set it
-	const headers: HeadersInit = {};
-	if (isFormDataPackage && typeof formDataAny.getHeaders === "function") {
-		// form-data package: use getHeaders() to get proper Content-Type with boundary
-		const formHeaders = formDataAny.getHeaders();
-		Object.assign(headers, formHeaders);
-	}
-	// Note: For native FormData, we don't set Content-Type - fetch handles it automatically
-
+	// Native FormData: fetch will automatically set Content-Type with boundary
+	// DO NOT set Content-Type header manually - let fetch handle it
 	const uploadResponse = await fetch(stagedTarget.url, {
 		method: "POST",
 		body: formData,
-		headers,
+		// Explicitly do NOT set headers - let fetch handle Content-Type with boundary
 	});
 
 	if (!uploadResponse.ok) {

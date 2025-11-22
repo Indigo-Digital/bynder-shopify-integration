@@ -74,8 +74,7 @@ describe("uploadBynderAsset", () => {
 						stagedUploadsCreate: {
 							stagedTargets: [
 								{
-									resourceUrl:
-										"https://shopify.com/staged-upload/resource-url",
+									resourceUrl: "https://shopify.com/staged-upload/resource-url",
 									url: "https://shopify.com/staged-upload/upload-url",
 									parameters: [
 										{ name: "key", value: "test-key" },
@@ -128,8 +127,8 @@ describe("uploadBynderAsset", () => {
 		);
 
 		// Verify fileCreate was called with resourceUrl
-		const fileCreateCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>)
-			.mock.calls[1];
+		const fileCreateCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>).mock
+			.calls[1];
 		expect(fileCreateCall).toBeDefined();
 		const fileCreateVariables = fileCreateCall?.[1]?.variables;
 		expect(fileCreateVariables?.files?.[0]?.originalSource).toBe(
@@ -182,8 +181,7 @@ describe("uploadBynderAsset", () => {
 						stagedUploadsCreate: {
 							stagedTargets: [
 								{
-									resourceUrl:
-										"https://shopify.com/staged-upload/resource-url",
+									resourceUrl: "https://shopify.com/staged-upload/resource-url",
 									url: "https://shopify.com/staged-upload/upload-url",
 									parameters: [
 										{ name: "key", value: "test-key" },

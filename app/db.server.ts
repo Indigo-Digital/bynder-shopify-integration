@@ -49,7 +49,8 @@ async function checkAndApplyMigration() {
 			try {
 				// Detect database type from connection string
 				const dbUrl = process.env.DATABASE_URL || "";
-				const isPostgreSQL = dbUrl.includes("postgres") || dbUrl.includes("postgresql");
+				const isPostgreSQL =
+					dbUrl.includes("postgres") || dbUrl.includes("postgresql");
 				const intType = isPostgreSQL ? "INT" : "INTEGER";
 
 				// Add columns - handle both PostgreSQL (IF NOT EXISTS) and SQLite
@@ -73,7 +74,8 @@ async function checkAndApplyMigration() {
 							err instanceof Error &&
 							(err.message.includes("duplicate column") ||
 								err.message.includes("already exists") ||
-								(err.message.includes("column") && err.message.includes("already exists")))
+								(err.message.includes("column") &&
+									err.message.includes("already exists")))
 						) {
 							console.log(`Column ${columnName} already exists, skipping`);
 							return;

@@ -172,7 +172,8 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 				try {
 					// Detect database type from connection string
 					const dbUrl = process.env.DATABASE_URL || "";
-					const isPostgreSQL = dbUrl.includes("postgres") || dbUrl.includes("postgresql");
+					const isPostgreSQL =
+						dbUrl.includes("postgres") || dbUrl.includes("postgresql");
 					const intType = isPostgreSQL ? "INT" : "INTEGER";
 
 					// Try to add columns - handle both PostgreSQL (IF NOT EXISTS) and SQLite
@@ -196,7 +197,8 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 								err instanceof Error &&
 								(err.message.includes("duplicate column") ||
 									err.message.includes("already exists") ||
-									err.message.includes("column") && err.message.includes("already exists"))
+									(err.message.includes("column") &&
+										err.message.includes("already exists")))
 							) {
 								console.log(`Column ${columnName} already exists, skipping`);
 								return;
@@ -231,7 +233,9 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 					// Migration failed, fall back to basic update
 					console.warn(
 						"Failed to apply migration automatically. Using fallback update.",
-						migrationError instanceof Error ? migrationError.message : String(migrationError)
+						migrationError instanceof Error
+							? migrationError.message
+							: String(migrationError)
 					);
 					await prisma.syncJob.update({
 						where: { id: syncJob.id },

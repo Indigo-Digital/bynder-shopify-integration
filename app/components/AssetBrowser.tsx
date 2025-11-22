@@ -101,6 +101,11 @@ export function AssetBrowser({
 		new Set(assets.flatMap((asset) => asset.tags || []))
 	).sort();
 
+	// Extract all unique asset types from current assets
+	const allAssetTypes = Array.from(
+		new Set(assets.map((asset) => asset.type).filter(Boolean))
+	).sort();
+
 	// Get thumbnail URL for an asset
 	const getThumbnailUrl = (asset: BynderAsset): string | null => {
 		if (asset.thumbnails && Object.keys(asset.thumbnails).length > 0) {
@@ -131,23 +136,39 @@ export function AssetBrowser({
 						}}
 						placeholder="Search by name or description..."
 					/>
-					<s-select
-						label="Asset Type"
-						value={assetType}
-						onChange={(e) => {
-							const target = e.currentTarget;
-							if (target) {
-								setAssetType(target.value);
+					<div>
+						<label
+							htmlFor="asset-type-select"
+							style={{
+								display: "block",
+								marginBottom: "0.5rem",
+								fontWeight: "500",
+							}}
+						>
+							Asset Type
+						</label>
+						<select
+							id="asset-type-select"
+							value={assetType}
+							onChange={(e) => {
+								setAssetType(e.target.value);
 								setPage(1);
-							}
-						}}
-					>
-						<option value="">All Types</option>
-						<option value="image">Image</option>
-						<option value="video">Video</option>
-						<option value="document">Document</option>
-						<option value="audio">Audio</option>
-					</s-select>
+							}}
+							style={{
+								padding: "0.5rem",
+								borderRadius: "4px",
+								border: "1px solid #ccc",
+								fontSize: "1rem",
+								minWidth: "150px",
+							}}
+						>
+							<option value="">All Types</option>
+							<option value="image">Image</option>
+							<option value="video">Video</option>
+							<option value="document">Document</option>
+							<option value="audio">Audio</option>
+						</select>
+					</div>
 					<s-button
 						variant="secondary"
 						onClick={() => {
@@ -271,28 +292,69 @@ export function AssetBrowser({
 												<s-text>
 													<strong>{asset.name}</strong>
 												</s-text>
-												{asset.tags && asset.tags.length > 0 && (
-													<div
-														style={{
-															display: "flex",
-															flexWrap: "wrap",
-															gap: "0.5rem",
-														}}
-													>
+												{asset.tags && asset.tags.length > 0 ? (
+													<div style={{ marginTop: "0.5rem" }}>
+														<span
+															style={{
+																fontSize: "0.875rem",
+																color: "#666",
+																marginBottom: "0.25rem",
+																display: "block",
+															}}
+														>
+															Tags:
+														</span>
+														<div
+															style={{
+																display: "flex",
+																flexWrap: "wrap",
+																gap: "0.5rem",
+															}}
+														>
 														{asset.tags.map((tag) => (
-															<s-button
+															<button
 																key={tag}
-																variant={
-																	existingTags.includes(tag)
-																		? "primary"
-																		: "secondary"
-																}
+																type="button"
 																onClick={() => handleTagClick(tag)}
 																disabled={existingTags.includes(tag)}
+																style={{
+																	padding: "0.25rem 0.75rem",
+																	borderRadius: "4px",
+																	border: "1px solid #ccc",
+																	backgroundColor: existingTags.includes(tag)
+																		? "#007bff"
+																		: "#f8f9fa",
+																	color: existingTags.includes(tag)
+																		? "#fff"
+																		: "#333",
+																	cursor: existingTags.includes(tag)
+																		? "not-allowed"
+																		: "pointer",
+																	fontSize: "0.875rem",
+																	fontWeight: "500",
+																	transition: "all 0.2s",
+																}}
+																onMouseEnter={(e) => {
+																	if (!existingTags.includes(tag)) {
+																		e.currentTarget.style.backgroundColor = "#e9ecef";
+																	}
+																}}
+																onMouseLeave={(e) => {
+																	if (!existingTags.includes(tag)) {
+																		e.currentTarget.style.backgroundColor = "#f8f9fa";
+																	}
+																}}
 															>
 																{tag}
-															</s-button>
+															</button>
 														))}
+														</div>
+													</div>
+												) : (
+													<div style={{ marginTop: "0.5rem" }}>
+														<span style={{ fontSize: "0.875rem", color: "#666" }}>
+															Tags: None
+														</span>
 													</div>
 												)}
 											</s-stack>
@@ -341,28 +403,69 @@ export function AssetBrowser({
 														{new Date(asset.dateModified).toLocaleDateString()}
 													</s-text>
 												)}
-												{asset.tags && asset.tags.length > 0 && (
-													<div
-														style={{
-															display: "flex",
-															flexWrap: "wrap",
-															gap: "0.5rem",
-														}}
-													>
+												{asset.tags && asset.tags.length > 0 ? (
+													<div style={{ marginTop: "0.5rem" }}>
+														<span
+															style={{
+																fontSize: "0.875rem",
+																color: "#666",
+																marginBottom: "0.25rem",
+																display: "block",
+															}}
+														>
+															Tags:
+														</span>
+														<div
+															style={{
+																display: "flex",
+																flexWrap: "wrap",
+																gap: "0.5rem",
+															}}
+														>
 														{asset.tags.map((tag) => (
-															<s-button
+															<button
 																key={tag}
-																variant={
-																	existingTags.includes(tag)
-																		? "primary"
-																		: "secondary"
-																}
+																type="button"
 																onClick={() => handleTagClick(tag)}
 																disabled={existingTags.includes(tag)}
+																style={{
+																	padding: "0.25rem 0.75rem",
+																	borderRadius: "4px",
+																	border: "1px solid #ccc",
+																	backgroundColor: existingTags.includes(tag)
+																		? "#007bff"
+																		: "#f8f9fa",
+																	color: existingTags.includes(tag)
+																		? "#fff"
+																		: "#333",
+																	cursor: existingTags.includes(tag)
+																		? "not-allowed"
+																		: "pointer",
+																	fontSize: "0.875rem",
+																	fontWeight: "500",
+																	transition: "all 0.2s",
+																}}
+																onMouseEnter={(e) => {
+																	if (!existingTags.includes(tag)) {
+																		e.currentTarget.style.backgroundColor = "#e9ecef";
+																	}
+																}}
+																onMouseLeave={(e) => {
+																	if (!existingTags.includes(tag)) {
+																		e.currentTarget.style.backgroundColor = "#f8f9fa";
+																	}
+																}}
 															>
 																{tag}
-															</s-button>
+															</button>
 														))}
+														</div>
+													</div>
+												) : (
+													<div style={{ marginTop: "0.5rem" }}>
+														<span style={{ fontSize: "0.875rem", color: "#666" }}>
+															Tags: None
+														</span>
 													</div>
 												)}
 											</s-stack>

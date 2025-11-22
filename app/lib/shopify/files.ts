@@ -170,11 +170,84 @@ export async function uploadBynderAsset(
 	const originalFilename = assetInfo.name || `bynder-${assetId}`;
 	const fileName = generateFileName(originalFilename, assetInfo.tags || []);
 
-	// Convert buffer to base64 for GraphQL upload
-	const base64File = buffer.toString("base64");
+	// Determine resource type based on content type
+	// Use IMAGE for image types, FILE for everything else
+	const isImage = contentType.startsWith("image/");
+	const resourceType = isImage ? "IMAGE" : "FILE";
 
-	// Upload to Shopify Files
-	const response = await admin.graphql(
+	// Step 1: Create staged upload target
+	const stagedUploadResponse = await admin.graphql(
+		`#graphql
+      mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+        stagedUploadsCreate(input: $input) {
+          stagedTargets {
+            resourceUrl
+            url
+            parameters {
+              name
+              value
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `,
+		{
+			variables: {
+				input: [
+					{
+						resource: resourceType,
+						filename: fileName,
+						mimeType: contentType,
+					},
+				],
+			},
+		}
+	);
+
+	const stagedUploadData = await stagedUploadResponse.json();
+
+	if (stagedUploadData.data?.stagedUploadsCreate?.userErrors?.length > 0) {
+		throw new Error(
+			`Failed to create staged upload: ${JSON.stringify(stagedUploadData.data.stagedUploadsCreate.userErrors)}`
+		);
+	}
+
+	const stagedTarget =
+		stagedUploadData.data?.stagedUploadsCreate?.stagedTargets?.[0];
+	if (!stagedTarget) {
+		throw new Error("No staged upload target returned from Shopify");
+	}
+
+	// Step 2: Upload file to staged upload URL
+	const formData = new FormData();
+	// Add parameters from staged upload
+	for (const param of stagedTarget.parameters) {
+		formData.append(param.name, param.value);
+	}
+	// Add the file - convert Buffer to Uint8Array for Blob
+	const uint8Array = new Uint8Array(buffer);
+	const blob = new Blob([uint8Array], { type: contentType });
+	formData.append("file", blob, fileName);
+
+	const uploadResponse = await fetch(stagedTarget.url, {
+		method: "POST",
+		body: formData,
+	});
+
+	if (!uploadResponse.ok) {
+		const statusText = uploadResponse.statusText || "Unknown error";
+		const statusCode = uploadResponse.status;
+		throw new Error(
+			`Failed to upload file to staged URL: HTTP ${statusCode}: ${statusText}`
+		);
+	}
+
+	// Step 3: Create file in Shopify using the resourceUrl
+	const fileCreateResponse = await admin.graphql(
 		`#graphql
       mutation fileCreate($files: [FileCreateInput!]!) {
         fileCreate(files: $files) {
@@ -201,7 +274,7 @@ export async function uploadBynderAsset(
 			variables: {
 				files: [
 					{
-						originalSource: `data:${contentType};base64,${base64File}`,
+						originalSource: stagedTarget.resourceUrl,
 						filename: fileName,
 						alt: assetInfo.description || assetInfo.name,
 					},
@@ -210,15 +283,15 @@ export async function uploadBynderAsset(
 		}
 	);
 
-	const data = await response.json();
+	const fileCreateData = await fileCreateResponse.json();
 
-	if (data.data?.fileCreate?.userErrors?.length > 0) {
+	if (fileCreateData.data?.fileCreate?.userErrors?.length > 0) {
 		throw new Error(
-			`Failed to upload file: ${JSON.stringify(data.data.fileCreate.userErrors)}`
+			`Failed to upload file: ${JSON.stringify(fileCreateData.data.fileCreate.userErrors)}`
 		);
 	}
 
-	const file = data.data?.fileCreate?.files?.[0];
+	const file = fileCreateData.data?.fileCreate?.files?.[0];
 	if (!file) {
 		throw new Error("No file returned from Shopify");
 	}

@@ -35,10 +35,34 @@ function generateFileName(
 async function downloadFile(
 	url: string
 ): Promise<{ buffer: Buffer; contentType: string }> {
-	const response = await fetch(url);
-	if (!response.ok) {
-		throw new Error(`Failed to download file: ${response.statusText}`);
+	let response: Response;
+	try {
+		response = await fetch(url);
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`Failed to download file from ${url}: Network error - ${errorMessage}`
+		);
 	}
+
+	if (!response.ok) {
+		const statusText = response.statusText || "Unknown error";
+		const statusCode = response.status;
+		let errorDetails = `HTTP ${statusCode}: ${statusText}`;
+
+		// Try to get error body if available
+		try {
+			const errorBody = await response.text();
+			if (errorBody && errorBody.length < 500) {
+				errorDetails += ` - ${errorBody}`;
+			}
+		} catch {
+			// Ignore errors reading response body
+		}
+
+		throw new Error(`Failed to download file from ${url}: ${errorDetails}`);
+	}
+
 	const arrayBuffer = await response.arrayBuffer();
 	const buffer = Buffer.from(arrayBuffer);
 	const contentType =
@@ -82,10 +106,13 @@ export async function uploadBynderAsset(
 
 	// Get download URL - try multiple methods
 	let downloadUrl: string | undefined;
+	let downloadUrlError: string | undefined;
 
 	try {
 		downloadUrl = await bynderClient.getMediaDownloadUrl({ id: assetId });
 	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		downloadUrlError = `SDK method failed: ${errorMessage}`;
 		console.warn("Failed to get download URL via SDK method:", error);
 	}
 
@@ -108,8 +135,23 @@ export async function uploadBynderAsset(
 		downloadUrl = `${baseUrl}/v4/media/${assetId}/download`;
 	}
 
+	if (!downloadUrl) {
+		throw new Error(
+			`Could not determine download URL for asset ${assetId}. ${downloadUrlError || "No download URL available"}`
+		);
+	}
+
 	// Download the file
-	const { buffer, contentType } = await downloadFile(downloadUrl);
+	let buffer: Buffer;
+	let contentType: string;
+	try {
+		const result = await downloadFile(downloadUrl);
+		buffer = result.buffer;
+		contentType = result.contentType;
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		throw new Error(`Failed to download asset ${assetId}: ${errorMessage}`);
+	}
 
 	// Generate file name with naming convention
 	const originalFilename = assetInfo.name || `bynder-${assetId}`;

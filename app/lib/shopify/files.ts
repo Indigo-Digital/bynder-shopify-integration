@@ -176,8 +176,8 @@ export async function uploadBynderAsset(
 	// Upload to Shopify Files
 	const response = await admin.graphql(
 		`#graphql
-      mutation filesCreate($files: [FileCreateInput!]!) {
-        filesCreate(files: $files) {
+      mutation fileCreate($files: [FileCreateInput!]!) {
+        fileCreate(files: $files) {
           files {
             id
             fileStatus
@@ -212,13 +212,13 @@ export async function uploadBynderAsset(
 
 	const data = await response.json();
 
-	if (data.data?.filesCreate?.userErrors?.length > 0) {
+	if (data.data?.fileCreate?.userErrors?.length > 0) {
 		throw new Error(
-			`Failed to upload file: ${JSON.stringify(data.data.filesCreate.userErrors)}`
+			`Failed to upload file: ${JSON.stringify(data.data.fileCreate.userErrors)}`
 		);
 	}
 
-	const file = data.data?.filesCreate?.files?.[0];
+	const file = data.data?.fileCreate?.files?.[0];
 	if (!file) {
 		throw new Error("No file returned from Shopify");
 	}

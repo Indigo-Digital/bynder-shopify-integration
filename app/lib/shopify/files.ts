@@ -31,13 +31,20 @@ function generateFileName(
 
 /**
  * Download file from URL and return as buffer
+ * Supports optional authentication token
  */
 async function downloadFile(
-	url: string
+	url: string,
+	authToken?: string
 ): Promise<{ buffer: Buffer; contentType: string }> {
+	const headers: HeadersInit = {};
+	if (authToken) {
+		headers.Authorization = `Bearer ${authToken}`;
+	}
+
 	let response: Response;
 	try {
-		response = await fetch(url);
+		response = await fetch(url, { headers });
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		throw new Error(
@@ -142,10 +149,16 @@ export async function uploadBynderAsset(
 	}
 
 	// Download the file
+	// Include permanent token in download request for authentication
+	const permanentToken =
+		"permanentToken" in bynderClient.config
+			? bynderClient.config.permanentToken
+			: undefined;
+
 	let buffer: Buffer;
 	let contentType: string;
 	try {
-		const result = await downloadFile(downloadUrl);
+		const result = await downloadFile(downloadUrl, permanentToken);
 		buffer = result.buffer;
 		contentType = result.contentType;
 	} catch (error) {

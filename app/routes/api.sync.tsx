@@ -20,6 +20,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const shop = session.shop;
 		const url = new URL(request.url);
 		const assetId = url.searchParams.get("assetId");
+		const forceImportAll = url.searchParams.get("forceImportAll") === "true";
 
 		// Get shop configuration
 		const shopConfig = await prisma.shop.findUnique({
@@ -95,6 +96,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 				shopId: shopConfig.id,
 				admin,
 				bynderClient,
+				forceImportAll,
 			});
 
 			return Response.json({ success: true, ...result });

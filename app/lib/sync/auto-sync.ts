@@ -7,6 +7,7 @@ interface SyncOptions {
 	shopId: string;
 	admin: AdminApi;
 	bynderClient: BynderClient;
+	forceImportAll?: boolean; // If true, import all assets even if they already exist
 }
 
 /**
@@ -90,9 +91,11 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 					},
 				});
 
-				// Check if update is needed (version changed)
+				// Check if update is needed (version changed or force import all)
 				const needsUpdate =
-					!existing || (existing.bynderVersion || 0) < asset.version;
+					options.forceImportAll ||
+					!existing ||
+					(existing.bynderVersion || 0) < asset.version;
 
 				if (needsUpdate) {
 					// Upload to Shopify

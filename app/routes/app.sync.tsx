@@ -129,22 +129,13 @@ export default function SyncDashboard() {
 				</s-banner>
 			)}
 
-			<s-stack direction="inline" gap="base" slot="primary-action">
-				<s-button
-					onClick={handleSync}
-					disabled={fetcher.state !== "idle"}
-					variant="primary"
-				>
-					{fetcher.state !== "idle" ? "Syncing..." : "Sync Now"}
-				</s-button>
-				<s-button
-					onClick={handleImportAll}
-					disabled={fetcher.state !== "idle"}
-					variant="secondary"
-				>
-					{fetcher.state !== "idle" ? "Importing..." : "Import All with Tags"}
-				</s-button>
-			</s-stack>
+			<s-button
+				slot="primary-action"
+				onClick={handleSync}
+				disabled={fetcher.state !== "idle"}
+			>
+				{fetcher.state !== "idle" ? "Syncing..." : "Sync Now"}
+			</s-button>
 
 			<s-section heading="Overview">
 				<s-stack direction="inline" gap="base">
@@ -153,6 +144,26 @@ export default function SyncDashboard() {
 						<s-heading>{syncedAssetsCount}</s-heading>
 					</s-box>
 				</s-stack>
+				<div style={{ marginTop: "1rem" }}>
+					<s-stack direction="inline" gap="base">
+						<s-button
+							onClick={handleSync}
+							disabled={fetcher.state !== "idle"}
+							variant="primary"
+						>
+							{fetcher.state !== "idle" ? "Syncing..." : "Sync Now"}
+						</s-button>
+						<s-button
+							onClick={handleImportAll}
+							disabled={fetcher.state !== "idle"}
+							variant="secondary"
+						>
+							{fetcher.state !== "idle"
+								? "Importing..."
+								: "Import All with Tags"}
+						</s-button>
+					</s-stack>
+				</div>
 				<div style={{ marginTop: "1rem", fontSize: "0.875rem", color: "#666" }}>
 					<s-paragraph>
 						<strong>Sync Now:</strong> Only imports assets that are new or have

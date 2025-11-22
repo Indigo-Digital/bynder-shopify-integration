@@ -233,18 +233,25 @@ export async function uploadBynderAsset(
 		);
 	}
 
+	if (stagedUploadData.errors) {
+		throw new Error(
+			`Shopify GraphQL errors: ${JSON.stringify(stagedUploadData.errors)}`
+		);
+	}
+
 	const stagedTarget =
 		stagedUploadData.data?.stagedUploadsCreate?.stagedTargets?.[0];
 	if (!stagedTarget) {
-		throw new Error("No staged upload target returned from Shopify");
+		throw new Error(
+			`No staged upload target returned from Shopify. Response: ${JSON.stringify(stagedUploadData, null, 2)}`
+		);
 	}
 
 	// Step 2: Upload file to staged upload URL
 	// For Shopify staged uploads (typically S3), we need to:
 	// 1. Add all parameters first (in order)
 	// 2. Add the file last
-	// 3. NOT set Content-Type header manually (let fetch set it with boundary)
-	// Use native FormData if available (Node.js 18+), otherwise form-data package will be used
+	// 3. Use native FormData (Node.js 20+)
 	const formData = new FormData();
 
 	// Add parameters from staged upload first (S3 requires specific order)
@@ -253,21 +260,22 @@ export async function uploadBynderAsset(
 	}
 
 	// Add the file last - this is critical for S3 uploads
-	// Always use native FormData (Node.js 18+ required)
-	// Convert buffer to File for native FormData
-	const uint8Array = new Uint8Array(buffer);
-	const uploadFile = new File([uint8Array], sanitizedStagedFilename, {
-		type: contentType,
-	});
-	formData.append("file", uploadFile);
+	// Convert Buffer to File for native FormData (Node.js 20+)
+	// Convert Buffer to Uint8Array to ensure proper type compatibility
+	const fileToUpload = new File(
+		[new Uint8Array(buffer)],
+		sanitizedStagedFilename,
+		{
+			type: contentType,
+		}
+	);
+	formData.append("file", fileToUpload);
 
 	// Upload to staged URL
 	// Native FormData: fetch will automatically set Content-Type with boundary
-	// DO NOT set Content-Type header manually - let fetch handle it
 	const uploadResponse = await fetch(stagedTarget.url, {
 		method: "POST",
 		body: formData,
-		// Explicitly do NOT set headers - let fetch handle Content-Type with boundary
 	});
 
 	if (!uploadResponse.ok) {

@@ -146,17 +146,47 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		}
 
 		// Update sync job with results
-		await prisma.syncJob.update({
-			where: { id: syncJob.id },
-			data: {
-				status: "completed",
-				completedAt: new Date(),
-				assetsProcessed: allAssets.length,
-				assetsCreated: created,
-				assetsUpdated: updated,
-				errors: errors.length > 0 ? JSON.stringify(errors) : null,
-			},
-		});
+		// Try to update with new fields first (after migration)
+		// If migration hasn't been applied, fall back to basic update
+		try {
+			await prisma.syncJob.update({
+				where: { id: syncJob.id },
+				data: {
+					status: "completed",
+					completedAt: new Date(),
+					assetsProcessed: allAssets.length,
+					assetsCreated: created,
+					assetsUpdated: updated,
+					errors: errors.length > 0 ? JSON.stringify(errors) : null,
+				},
+			});
+		} catch (error) {
+			// If migration hasn't been run yet, update without new fields
+			if (
+				error instanceof Error &&
+				error.message.includes("Unknown argument")
+			) {
+				console.warn(
+					"Database migration not applied yet. Run 'pnpm prisma migrate dev' to enable error tracking."
+				);
+				// Fall back to basic update without new fields
+				await prisma.syncJob.update({
+					where: { id: syncJob.id },
+					data: {
+						status: "completed",
+						completedAt: new Date(),
+						assetsProcessed: allAssets.length,
+						// Store errors in the error field if there are any (limited to first error)
+						error:
+							errors.length > 0
+								? `${errors.length} asset error${errors.length !== 1 ? "s" : ""} occurred. Run migration to see details.`
+								: null,
+					},
+				});
+			} else {
+				throw error;
+			}
+		}
 
 		return {
 			processed: allAssets.length,

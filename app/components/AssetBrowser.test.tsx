@@ -1,6 +1,5 @@
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { AssetBrowser, type AssetsResponse } from "./AssetBrowser.js";
 
 // Mock react-router

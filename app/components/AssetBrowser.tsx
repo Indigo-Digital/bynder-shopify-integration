@@ -164,7 +164,13 @@ export function AssetBrowser({
 						<s-text>
 							<strong>Filter by Tags:</strong>
 						</s-text>
-						<div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+						<div
+							style={{
+								display: "flex",
+								flexWrap: "wrap",
+								gap: "0.5rem",
+							}}
+						>
 							{allTagsFromAssets.slice(0, 20).map((tag) => (
 								<s-button
 									key={tag}
@@ -266,7 +272,13 @@ export function AssetBrowser({
 													<strong>{asset.name}</strong>
 												</s-text>
 												{asset.tags && asset.tags.length > 0 && (
-													<div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+													<div
+														style={{
+															display: "flex",
+															flexWrap: "wrap",
+															gap: "0.5rem",
+														}}
+													>
 														{asset.tags.map((tag) => (
 															<s-button
 																key={tag}
@@ -298,7 +310,13 @@ export function AssetBrowser({
 									borderWidth="base"
 									borderRadius="base"
 								>
-									<div style={{ display: "flex", gap: "1rem", alignItems: "start" }}>
+									<div
+										style={{
+											display: "flex",
+											gap: "1rem",
+											alignItems: "start",
+										}}
+									>
 										{getThumbnailUrl(asset) && (
 											<img
 												src={getThumbnailUrl(asset) || ""}
@@ -324,7 +342,13 @@ export function AssetBrowser({
 													</s-text>
 												)}
 												{asset.tags && asset.tags.length > 0 && (
-													<div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+													<div
+														style={{
+															display: "flex",
+															flexWrap: "wrap",
+															gap: "0.5rem",
+														}}
+													>
 														{asset.tags.map((tag) => (
 															<s-button
 																key={tag}

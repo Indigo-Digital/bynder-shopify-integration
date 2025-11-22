@@ -58,15 +58,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		const bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
 
 		// Build query parameters
-		const queryParams: Parameters<
-			typeof bynderClient.getMediaList
-		>[0] = {
+		const queryParams: Parameters<typeof bynderClient.getMediaList>[0] = {
 			page,
 			limit,
 			...(keyword && { keyword }),
-			...(tags && tags.length > 0 && {
-				tags: tags.length === 1 ? tags[0] : tags,
-			}),
+			...(tags &&
+				tags.length > 0 && {
+					tags: tags.length === 1 ? tags[0] : tags,
+				}),
 			...(type && { type }),
 		};
 

@@ -170,15 +170,49 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 					"Detected missing database columns. Attempting to apply migration automatically..."
 				);
 				try {
-					// Try to add the columns directly
-					await prisma.$executeRawUnsafe(
-						`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS "errors" TEXT`
+					// Detect database type from connection string
+					const dbUrl = process.env.DATABASE_URL || "";
+					const isPostgreSQL = dbUrl.includes("postgres") || dbUrl.includes("postgresql");
+					const intType = isPostgreSQL ? "INT" : "INTEGER";
+
+					// Try to add columns - handle both PostgreSQL (IF NOT EXISTS) and SQLite
+					const addColumn = async (columnDef: string, columnName: string) => {
+						try {
+							if (isPostgreSQL) {
+								// PostgreSQL supports IF NOT EXISTS
+								await prisma.$executeRawUnsafe(
+									`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS ${columnDef}`
+								);
+							} else {
+								// SQLite doesn't support IF NOT EXISTS, so catch duplicate errors
+								await prisma.$executeRawUnsafe(
+									`ALTER TABLE "SyncJob" ADD COLUMN ${columnDef}`
+								);
+							}
+							console.log(`Added column: ${columnName}`);
+						} catch (err) {
+							// Column might already exist (race condition or already added)
+							if (
+								err instanceof Error &&
+								(err.message.includes("duplicate column") ||
+									err.message.includes("already exists") ||
+									err.message.includes("column") && err.message.includes("already exists"))
+							) {
+								console.log(`Column ${columnName} already exists, skipping`);
+								return;
+							}
+							throw err;
+						}
+					};
+
+					await addColumn(`"errors" TEXT`, "errors");
+					await addColumn(
+						`"assetsCreated" ${intType} NOT NULL DEFAULT 0`,
+						"assetsCreated"
 					);
-					await prisma.$executeRawUnsafe(
-						`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS "assetsCreated" INTEGER NOT NULL DEFAULT 0`
-					);
-					await prisma.$executeRawUnsafe(
-						`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS "assetsUpdated" INTEGER NOT NULL DEFAULT 0`
+					await addColumn(
+						`"assetsUpdated" ${intType} NOT NULL DEFAULT 0`,
+						"assetsUpdated"
 					);
 					console.log("Migration applied successfully! Retrying update...");
 					// Retry the update with new fields
@@ -194,70 +228,24 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 						},
 					});
 				} catch (migrationError) {
-					// If migration fails (e.g., SQLite doesn't support IF NOT EXISTS), try without it
-					if (
-						migrationError instanceof Error &&
-						migrationError.message.includes("IF NOT EXISTS")
-					) {
-						try {
-							// SQLite doesn't support IF NOT EXISTS, so try without it and catch duplicate errors
-							await prisma.$executeRawUnsafe(
-								`ALTER TABLE "SyncJob" ADD COLUMN "errors" TEXT`
-							);
-						} catch (e) {
-							if (!(e instanceof Error && e.message.includes("duplicate"))) {
-								throw e;
-							}
-						}
-						try {
-							await prisma.$executeRawUnsafe(
-								`ALTER TABLE "SyncJob" ADD COLUMN "assetsCreated" INTEGER NOT NULL DEFAULT 0`
-							);
-						} catch (e) {
-							if (!(e instanceof Error && e.message.includes("duplicate"))) {
-								throw e;
-							}
-						}
-						try {
-							await prisma.$executeRawUnsafe(
-								`ALTER TABLE "SyncJob" ADD COLUMN "assetsUpdated" INTEGER NOT NULL DEFAULT 0`
-							);
-						} catch (e) {
-							if (!(e instanceof Error && e.message.includes("duplicate"))) {
-								throw e;
-							}
-						}
-						// Retry the update
-						await prisma.syncJob.update({
-							where: { id: syncJob.id },
-							data: {
-								status: "completed",
-								completedAt: new Date(),
-								assetsProcessed: allAssets.length,
-								assetsCreated: created,
-								assetsUpdated: updated,
-								errors: errors.length > 0 ? JSON.stringify(errors) : null,
-							},
-						});
-					} else {
-						// Migration failed, fall back to basic update
-						console.warn(
-							"Failed to apply migration automatically. Using fallback update."
-						);
-						await prisma.syncJob.update({
-							where: { id: syncJob.id },
-							data: {
-								status: "completed",
-								completedAt: new Date(),
-								assetsProcessed: allAssets.length,
-								// Store errors in the error field if there are any (limited to first error)
-								error:
-									errors.length > 0
-										? `${errors.length} asset error${errors.length !== 1 ? "s" : ""} occurred.`
-										: null,
-							},
-						});
-					}
+					// Migration failed, fall back to basic update
+					console.warn(
+						"Failed to apply migration automatically. Using fallback update.",
+						migrationError instanceof Error ? migrationError.message : String(migrationError)
+					);
+					await prisma.syncJob.update({
+						where: { id: syncJob.id },
+						data: {
+							status: "completed",
+							completedAt: new Date(),
+							assetsProcessed: allAssets.length,
+							// Store errors in the error field if there are any (limited to first error)
+							error:
+								errors.length > 0
+									? `${errors.length} asset error${errors.length !== 1 ? "s" : ""} occurred.`
+									: null,
+						},
+					});
 				}
 			} else {
 				throw error;

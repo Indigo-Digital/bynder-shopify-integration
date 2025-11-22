@@ -47,19 +47,33 @@ async function checkAndApplyMigration() {
 				"Detected missing database columns. Applying migration automatically..."
 			);
 			try {
-				// Add columns - SQLite doesn't support IF NOT EXISTS, so catch duplicate errors
+				// Detect database type from connection string
+				const dbUrl = process.env.DATABASE_URL || "";
+				const isPostgreSQL = dbUrl.includes("postgres") || dbUrl.includes("postgresql");
+				const intType = isPostgreSQL ? "INT" : "INTEGER";
+
+				// Add columns - handle both PostgreSQL (IF NOT EXISTS) and SQLite
 				const addColumn = async (columnDef: string, columnName: string) => {
 					try {
-						await prisma.$executeRawUnsafe(
-							`ALTER TABLE "SyncJob" ADD COLUMN ${columnDef}`
-						);
+						if (isPostgreSQL) {
+							// PostgreSQL supports IF NOT EXISTS
+							await prisma.$executeRawUnsafe(
+								`ALTER TABLE "SyncJob" ADD COLUMN IF NOT EXISTS ${columnDef}`
+							);
+						} else {
+							// SQLite doesn't support IF NOT EXISTS, so catch duplicate errors
+							await prisma.$executeRawUnsafe(
+								`ALTER TABLE "SyncJob" ADD COLUMN ${columnDef}`
+							);
+						}
 						console.log(`Added column: ${columnName}`);
 					} catch (err) {
 						// Column might already exist (race condition or already added)
 						if (
 							err instanceof Error &&
 							(err.message.includes("duplicate column") ||
-								err.message.includes("already exists"))
+								err.message.includes("already exists") ||
+								(err.message.includes("column") && err.message.includes("already exists")))
 						) {
 							console.log(`Column ${columnName} already exists, skipping`);
 							return;
@@ -70,11 +84,11 @@ async function checkAndApplyMigration() {
 
 				await addColumn('"errors" TEXT', "errors");
 				await addColumn(
-					'"assetsCreated" INTEGER NOT NULL DEFAULT 0',
+					`"assetsCreated" ${intType} NOT NULL DEFAULT 0`,
 					"assetsCreated"
 				);
 				await addColumn(
-					'"assetsUpdated" INTEGER NOT NULL DEFAULT 0',
+					`"assetsUpdated" ${intType} NOT NULL DEFAULT 0`,
 					"assetsUpdated"
 				);
 				console.log("Migration applied successfully!");

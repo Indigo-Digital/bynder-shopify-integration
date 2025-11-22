@@ -1,8 +1,8 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loader } from "./api.bynder.assets.js";
+import { loader } from "../api.bynder.assets.js";
 
-vi.mock("../db.server.js", () => {
+vi.mock("../../db.server.js", () => {
 	const mockPrisma = {
 		shop: {
 			findUnique: vi.fn(),
@@ -13,21 +13,21 @@ vi.mock("../db.server.js", () => {
 	};
 });
 
-vi.mock("../lib/bynder/client.js", () => ({
+vi.mock("../../lib/bynder/client.js", () => ({
 	BynderClient: {
 		createFromEnv: vi.fn(),
 	},
 }));
 
-vi.mock("../shopify.server.js", () => ({
+vi.mock("../../shopify.server.js", () => ({
 	authenticate: {
 		admin: vi.fn(),
 	},
 }));
 
-import prisma from "../db.server.js";
-import { BynderClient } from "../lib/bynder/client.js";
-import { authenticate } from "../shopify.server.js";
+import prisma from "../../db.server.js";
+import { BynderClient } from "../../lib/bynder/client.js";
+import { authenticate } from "../../shopify.server.js";
 
 const mockPrisma = prisma as unknown as {
 	shop: {

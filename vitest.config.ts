@@ -15,7 +15,8 @@ export default defineConfig({
 			"build",
 			"extensions/**/node_modules",
 			"**/node_modules/**",
-			// Note: Route handlers are tested via their test files
+			// Exclude route handler files (but not test files in __tests__)
+			"app/routes/**/!(*.test|*.spec).{ts,tsx}",
 		],
 		coverage: {
 			provider: "v8",

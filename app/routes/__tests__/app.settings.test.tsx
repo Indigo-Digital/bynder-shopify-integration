@@ -1,8 +1,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { action, loader } from "./app.settings.js";
+import { action, loader } from "../app.settings.js";
 
-vi.mock("../db.server.js", () => {
+vi.mock("../../db.server.js", () => {
 	const mockPrisma = {
 		shop: {
 			findUnique: vi.fn(),
@@ -20,14 +20,14 @@ vi.mock("../db.server.js", () => {
 	};
 });
 
-vi.mock("../shopify.server.js", () => ({
+vi.mock("../../shopify.server.js", () => ({
 	authenticate: {
 		admin: vi.fn(),
 	},
 }));
 
-import prisma from "../db.server.js";
-import { authenticate } from "../shopify.server.js";
+import prisma from "../../db.server.js";
+import { authenticate } from "../../shopify.server.js";
 
 const mockPrisma = prisma as unknown as {
 	shop: {

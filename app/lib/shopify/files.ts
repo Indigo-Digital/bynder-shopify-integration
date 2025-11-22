@@ -276,12 +276,21 @@ export async function uploadBynderAsset(
 		formData.append("file", uploadFile);
 	}
 
-	// Upload to staged URL - DO NOT set Content-Type header manually
-	// fetch will automatically set it with the correct boundary for multipart/form-data
+	// Upload to staged URL
+	// For form-data package, we need to use getHeaders() to get proper Content-Type with boundary
+	// For native FormData, fetch will automatically set it
+	const headers: HeadersInit = {};
+	if (isFormDataPackage && typeof formDataAny.getHeaders === "function") {
+		// form-data package: use getHeaders() to get proper Content-Type with boundary
+		const formHeaders = formDataAny.getHeaders();
+		Object.assign(headers, formHeaders);
+	}
+	// Note: For native FormData, we don't set Content-Type - fetch handles it automatically
+
 	const uploadResponse = await fetch(stagedTarget.url, {
 		method: "POST",
 		body: formData,
-		// Explicitly do NOT set headers - let fetch handle Content-Type with boundary
+		headers,
 	});
 
 	if (!uploadResponse.ok) {

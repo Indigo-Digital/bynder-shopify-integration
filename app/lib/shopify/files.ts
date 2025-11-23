@@ -350,7 +350,7 @@ export async function uploadBynderAsset(
 
 	// Retry logic for transient network failures
 	const MAX_RETRIES = 3;
-	let uploadResponse: Response;
+	let uploadResponse: Response | null = null;
 	let lastError: Error | null = null;
 
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {

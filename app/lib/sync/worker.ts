@@ -3,6 +3,9 @@ import { unauthenticated } from "../../shopify.server.js";
 import { BynderClient } from "../bynder/client.js";
 import { syncBynderAssets } from "./auto-sync.js";
 
+// Log immediately to confirm worker is starting
+console.log("[Worker] Worker script loaded, imports initialized");
+
 const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
 
 /**
@@ -122,8 +125,29 @@ async function processJobs() {
 }
 
 // Start the worker
-console.log("[Worker] Starting sync job worker...");
-processJobs().catch((error) => {
-	console.error("[Worker] Fatal error:", error);
+async function startWorker() {
+	console.log("[Worker] Starting sync job worker...");
+	console.log("[Worker] Testing database connection...");
+	try {
+		// Test database connection
+		await prisma.$connect();
+		console.log("[Worker] Database connected successfully");
+	} catch (dbError) {
+		console.error("[Worker] Database connection failed:", dbError);
+		console.error("[Worker] Error details:", dbError instanceof Error ? dbError.stack : String(dbError));
+		process.exit(1);
+	}
+
+	console.log("[Worker] Starting job processing loop...");
+	processJobs().catch((error) => {
+		console.error("[Worker] Fatal error in processJobs:", error);
+		console.error("[Worker] Error stack:", error instanceof Error ? error.stack : "No stack");
+		process.exit(1);
+	});
+}
+
+startWorker().catch((error) => {
+	console.error("[Worker] Fatal error starting worker:", error);
+	console.error("[Worker] Error stack:", error instanceof Error ? error.stack : "No stack");
 	process.exit(1);
 });

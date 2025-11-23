@@ -44,9 +44,25 @@ async function downloadFile(
 
 	let response: Response;
 	try {
-		response = await fetch(url, { headers });
+		// Create abort controller for timeout (2 minutes for download)
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 2 * 60 * 1000);
+
+		response = await fetch(url, {
+			headers,
+			signal: controller.signal,
+		});
+
+		clearTimeout(timeoutId);
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
+		// Check if it's an abort error (timeout)
+		if (error instanceof Error && error.name === "AbortError") {
+			throw new Error(
+				`Download timeout: File download from Bynder took longer than 2 minutes. URL: ${url}`
+			);
+		}
+		// Generic network error
 		throw new Error(
 			`Failed to download file from ${url}: Network error - ${errorMessage}`
 		);
@@ -332,13 +348,35 @@ export async function uploadBynderAsset(
 		uploadBody = formData;
 	}
 
-	const uploadResponse = await fetch(stagedTarget.url, {
-		method: "POST",
-		body: uploadBody,
-		headers: uploadHeaders,
-		// Required when using ReadableStream as body in Node.js fetch
-		...(isPolyfill && { duplex: "half" as const }),
-	});
+	let uploadResponse: Response;
+	try {
+		// Create abort controller for timeout (5 minutes for large files)
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+		uploadResponse = await fetch(stagedTarget.url, {
+			method: "POST",
+			body: uploadBody,
+			headers: uploadHeaders,
+			// Required when using ReadableStream as body in Node.js fetch
+			...(isPolyfill && { duplex: "half" as const }),
+			signal: controller.signal,
+		});
+
+		clearTimeout(timeoutId);
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		// Check if it's an abort error (timeout or cancelled)
+		if (error instanceof Error && error.name === "AbortError") {
+			throw new Error(
+				`Upload timeout: File upload to Shopify took longer than 5 minutes. This may indicate a network issue or the file is too large. URL: ${stagedTarget.url}`
+			);
+		}
+		// Generic network error
+		throw new Error(
+			`Network error uploading file to Shopify: ${errorMessage}. URL: ${stagedTarget.url}`
+		);
+	}
 
 	if (!uploadResponse.ok) {
 		const statusText = uploadResponse.statusText || "Unknown error";

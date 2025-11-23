@@ -295,15 +295,15 @@ export async function uploadBynderAsset(
 
 	// Upload to staged URL
 	// Native FormData: fetch will automatically set Content-Type with boundary
-	// form-data polyfill: need to convert stream to buffer and get headers manually
+	// form-data polyfill: must send as stream to preserve signature, convert Node.js stream to web ReadableStream
 	let uploadBody: BodyInit;
 	let uploadHeaders: HeadersInit = {};
 
 	if (isPolyfill) {
-		// form-data polyfill needs to be converted to a buffer
+		// form-data polyfill must be sent as stream to preserve Shopify's signature
+		// Converting to buffer breaks the signature because it changes the exact bytes
 		const polyfillFormData = formData as unknown as {
 			getHeaders?: () => HeadersInit;
-			getBuffer?: () => Promise<Buffer>;
 		} & NodeJS.ReadableStream;
 
 		// Get headers first
@@ -311,24 +311,22 @@ export async function uploadBynderAsset(
 			uploadHeaders = polyfillFormData.getHeaders();
 		}
 
-		// Convert form-data stream to buffer
-		if (typeof polyfillFormData.getBuffer === "function") {
-			// form-data v4+ has getBuffer()
-			const buffer = await polyfillFormData.getBuffer();
-			uploadBody = new Uint8Array(buffer);
-		} else {
-			// form-data v2/v3 - convert stream to buffer
-			const chunks: Buffer[] = [];
-
-			await new Promise<void>((resolve, reject) => {
-				polyfillFormData.on("data", (chunk: Buffer) => chunks.push(chunk));
-				polyfillFormData.on("end", () => resolve());
-				polyfillFormData.on("error", reject);
-			});
-
-			const buffer = Buffer.concat(chunks);
-			uploadBody = new Uint8Array(buffer);
-		}
+		// Convert Node.js ReadableStream to web ReadableStream for fetch
+		// This preserves the exact stream data that Shopify signed
+		const nodeStream = polyfillFormData as NodeJS.ReadableStream;
+		uploadBody = new ReadableStream({
+			start(controller) {
+				nodeStream.on("data", (chunk: Buffer) => {
+					controller.enqueue(new Uint8Array(chunk));
+				});
+				nodeStream.on("end", () => {
+					controller.close();
+				});
+				nodeStream.on("error", (err) => {
+					controller.error(err);
+				});
+			},
+		});
 	} else {
 		// Native FormData - fetch handles it automatically
 		uploadBody = formData;

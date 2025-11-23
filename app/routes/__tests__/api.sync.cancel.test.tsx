@@ -1,3 +1,4 @@
+import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { action } from "../api.sync.cancel.js";
 
@@ -77,7 +78,7 @@ describe("api.sync.cancel", () => {
 			body: JSON.stringify({ jobId: "job-123" }),
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(200);
@@ -109,7 +110,7 @@ describe("api.sync.cancel", () => {
 			body: JSON.stringify({ jobId: "job-123" }),
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(200);
@@ -130,7 +131,7 @@ describe("api.sync.cancel", () => {
 			body: JSON.stringify({ jobId: "job-123" }),
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(400);
@@ -156,7 +157,7 @@ describe("api.sync.cancel", () => {
 			body: JSON.stringify({ jobId: "job-123" }),
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(403);
@@ -172,7 +173,7 @@ describe("api.sync.cancel", () => {
 			body: JSON.stringify({ jobId: "non-existent" }),
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(404);
@@ -186,7 +187,7 @@ describe("api.sync.cancel", () => {
 			body: JSON.stringify({}),
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(400);
@@ -198,7 +199,7 @@ describe("api.sync.cancel", () => {
 			method: "GET",
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(405);

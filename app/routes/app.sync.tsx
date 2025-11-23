@@ -61,10 +61,7 @@ export default function SyncDashboard() {
 
 	const handleCancelJob = (jobId: string) => {
 		console.log("[UI] Cancelling job:", jobId);
-		fetcher.submit(
-			{ jobId },
-			{ method: "POST", action: "/api/sync/cancel" }
-		);
+		fetcher.submit({ jobId }, { method: "POST", action: "/api/sync/cancel" });
 	};
 
 	// Reload data when sync or cancel completes

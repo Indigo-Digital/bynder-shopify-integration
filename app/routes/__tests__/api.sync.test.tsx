@@ -1,3 +1,4 @@
+import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { action } from "../api.sync.js";
 
@@ -88,7 +89,7 @@ describe("api.sync", () => {
 		mockPrisma.shop.findUnique.mockResolvedValue(mockShop);
 		mockBynderClient.createFromEnv.mockReturnValue({
 			getMediaInfo: vi.fn(),
-		} as any);
+		} as unknown as ReturnType<typeof BynderClient.createFromEnv>);
 	});
 
 	it("should create pending job for full sync", async () => {
@@ -104,7 +105,7 @@ describe("api.sync", () => {
 			method: "POST",
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(200);
@@ -130,7 +131,7 @@ describe("api.sync", () => {
 
 		mockBynderClient.createFromEnv.mockReturnValue({
 			getMediaInfo: vi.fn().mockResolvedValue(mockAssetInfo),
-		} as any);
+		} as unknown as ReturnType<typeof BynderClient.createFromEnv>);
 
 		vi.mocked(uploadBynderAsset).mockResolvedValue({
 			fileId: "gid://shopify/File/123",
@@ -148,7 +149,7 @@ describe("api.sync", () => {
 			method: "POST",
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(200);
@@ -175,7 +176,7 @@ describe("api.sync", () => {
 			method: "POST",
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(400);
@@ -187,7 +188,7 @@ describe("api.sync", () => {
 			method: "GET",
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(405);
@@ -201,7 +202,7 @@ describe("api.sync", () => {
 			method: "POST",
 		});
 
-		const response = await action({ request } as any);
+		const response = await action({ request } as unknown as ActionFunctionArgs);
 		const data = await response.json();
 
 		expect(response.status).toBe(500);

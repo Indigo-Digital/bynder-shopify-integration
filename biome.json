@@ -8,6 +8,11 @@
 				"noStaticElementInteractions": {
 					"level": "off"
 				}
+			},
+			"suspicious": {
+				"noExplicitAny": {
+					"level": "warn"
+				}
 			}
 		}
 	},
@@ -37,7 +42,8 @@
 			"!!**/*.sqlite",
 			"!!**/*.sqlite-journal",
 			"!!**/prisma/migrations",
-			"!!**/extensions/**/node_modules"
+			"!!**/extensions/**/node_modules",
+			"!!**/coverage"
 		]
 	}
 }

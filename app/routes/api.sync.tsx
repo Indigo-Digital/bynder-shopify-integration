@@ -2,7 +2,6 @@ import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
 import { uploadBynderAsset } from "../lib/shopify/files.js";
-import { syncBynderAssets } from "../lib/sync/auto-sync.js";
 import { authenticate } from "../shopify.server.js";
 
 /**
@@ -20,7 +19,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const shop = session.shop;
 		const url = new URL(request.url);
 		const assetId = url.searchParams.get("assetId");
-		const forceImportAll = url.searchParams.get("forceImportAll") === "true";
 
 		// Get shop configuration
 		const shopConfig = await prisma.shop.findUnique({

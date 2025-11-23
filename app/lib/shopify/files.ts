@@ -311,11 +311,11 @@ export async function uploadBynderAsset(
 
 	// Helper function to create FormData and upload body for each retry attempt
 	// This is necessary because streams/buffers can only be consumed once
-	const createUploadBody = (): {
+	const createUploadBody = async (): Promise<{
 		body: BodyInit;
 		headers: HeadersInit;
 		needsDuplex: boolean;
-	} => {
+	}> => {
 		const retryFormData = new FormData();
 
 		// Detect if we're using the form-data polyfill (has _boundary property) vs native FormData
@@ -355,13 +355,14 @@ export async function uploadBynderAsset(
 		}
 
 		// Create upload body and headers
-		let retryUploadBody: BodyInit;
+		let retryUploadBody: BodyInit | undefined;
 		let retryUploadHeaders: HeadersInit = {};
 		let needsDuplex = false;
 
 		if (retryIsPolyfill) {
 			const polyfillFormData = retryFormData as unknown as {
 				getHeaders?: () => HeadersInit;
+				getBuffer?: () => Promise<Buffer> | Buffer;
 			} & NodeJS.ReadableStream;
 
 			// Get headers if available
@@ -369,108 +370,82 @@ export async function uploadBynderAsset(
 				retryUploadHeaders = polyfillFormData.getHeaders();
 			}
 
-			// For form-data polyfill, convert Node.js stream to Web ReadableStream
-			// Use a more robust conversion that handles errors and cleanup properly
-			const nodeStream = polyfillFormData as NodeJS.ReadableStream & {
-				destroy?: (error?: Error) => void;
-				pause?: () => void;
-				resume?: () => void;
-			};
-
-			// Pause the stream to ensure we can set up handlers before it starts flowing
-			if (typeof nodeStream.pause === "function") {
-				nodeStream.pause();
+			// Try to use getBuffer() if available (most reliable method)
+			if (typeof polyfillFormData.getBuffer === "function") {
+				try {
+					const formDataBuffer = polyfillFormData.getBuffer();
+					// Handle both sync and async getBuffer
+					const buffer =
+						formDataBuffer instanceof Promise
+							? await formDataBuffer
+							: formDataBuffer;
+					// Convert Buffer to Uint8Array for BodyInit
+					retryUploadBody = new Uint8Array(buffer);
+					needsDuplex = false;
+				} catch (error) {
+					// If getBuffer fails, fall back to stream collection
+					console.warn(
+						`[Upload] getBuffer() failed, using stream collection: ${error instanceof Error ? error.message : String(error)}`
+					);
+					// Fall through to stream collection
+				}
 			}
 
-			// Convert Node.js ReadableStream to Web ReadableStream
-			// This approach is more reliable in worker/serverless environments
-			let streamStarted = false;
+			// If getBuffer didn't work or isn't available, collect stream into buffer
+			if (!retryUploadBody) {
+				const nodeStream = polyfillFormData as NodeJS.ReadableStream;
+				const chunks: Buffer[] = [];
+				let streamError: Error | null = null;
 
-			retryUploadBody = new ReadableStream({
-				start(controller) {
-					if (streamStarted) {
-						// Prevent multiple starts
-						return;
+				// Pause stream first to ensure we can set up handlers
+				if (
+					typeof (nodeStream as { pause?: () => void }).pause === "function"
+				) {
+					(nodeStream as { pause: () => void }).pause();
+				}
+
+				// Collect all stream data into chunks
+				await new Promise<void>((resolve, reject) => {
+					nodeStream.on("data", (chunk: Buffer) => {
+						chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+					});
+
+					nodeStream.on("end", () => {
+						if (streamError) {
+							reject(streamError);
+							return;
+						}
+						resolve();
+					});
+
+					nodeStream.on("error", (err: Error) => {
+						streamError = err;
+						reject(err);
+					});
+
+					// Resume the stream to start collecting data
+					if (
+						typeof (nodeStream as { resume?: () => void }).resume === "function"
+					) {
+						(nodeStream as { resume: () => void }).resume();
 					}
-					streamStarted = true;
+				});
 
-					// Set up error handler first
-					const errorHandler = (err: Error) => {
-						try {
-							controller.error(err);
-						} catch {
-							// Controller might already be errored
-						}
-					};
-					nodeStream.on("error", errorHandler);
+				// Combine all chunks into a single buffer
+				const formDataBuffer = Buffer.concat(chunks);
 
-					// Handle stream end
-					const endHandler = () => {
-						try {
-							// Clean up all listeners
-							nodeStream.removeListener("error", errorHandler);
-							nodeStream.removeListener("data", dataHandler);
-							nodeStream.removeListener("end", endHandler);
-							controller.close();
-						} catch (_err) {
-							// Ignore errors on close (stream might already be closed)
-						}
-					};
-					nodeStream.on("end", endHandler);
-
-					// Handle data chunks
-					const dataHandler = (chunk: Buffer) => {
-						try {
-							// Convert Buffer to Uint8Array for Web Streams
-							const uint8Array =
-								chunk instanceof Uint8Array
-									? chunk
-									: new Uint8Array(
-											(chunk as Buffer).buffer,
-											(chunk as Buffer).byteOffset,
-											(chunk as Buffer).byteLength
-										);
-							controller.enqueue(uint8Array);
-						} catch (err) {
-							// Clean up listeners on error
-							nodeStream.removeListener("error", errorHandler);
-							nodeStream.removeListener("data", dataHandler);
-							nodeStream.removeListener("end", endHandler);
-							controller.error(
-								err instanceof Error ? err : new Error(String(err))
-							);
-						}
-					};
-					nodeStream.on("data", dataHandler);
-
-					// Resume the stream now that handlers are attached
-					if (typeof nodeStream.resume === "function") {
-						nodeStream.resume();
-					}
-				},
-				cancel(reason) {
-					// Clean up Node.js stream if fetch is cancelled
-					try {
-						if (typeof nodeStream.destroy === "function") {
-							nodeStream.destroy(reason instanceof Error ? reason : undefined);
-						} else if (
-							typeof (nodeStream as { removeAllListeners?: () => void })
-								.removeAllListeners === "function"
-						) {
-							(
-								nodeStream as { removeAllListeners: () => void }
-							).removeAllListeners();
-						}
-					} catch {
-						// Ignore cleanup errors
-					}
-				},
-			});
-			needsDuplex = true;
+				// Convert Buffer to Uint8Array for BodyInit
+				retryUploadBody = new Uint8Array(formDataBuffer);
+				needsDuplex = false;
+			}
 		} else {
 			// Native FormData - use directly
 			retryUploadBody = retryFormData;
 			needsDuplex = false;
+		}
+
+		if (!retryUploadBody) {
+			throw new Error("Failed to create upload body");
 		}
 
 		return {
@@ -493,7 +468,7 @@ export async function uploadBynderAsset(
 				body: uploadBody,
 				headers: uploadHeaders,
 				needsDuplex,
-			} = createUploadBody();
+			} = await createUploadBody();
 
 			// Create abort controller for timeout (5 minutes for large files)
 			const controller = new AbortController();

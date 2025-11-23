@@ -45,7 +45,9 @@ async function processJobs() {
 				continue;
 			}
 
-			console.log(`[Worker] Found job: ${pendingJob.id} (status: ${pendingJob.status})`);
+			console.log(
+				`[Worker] Found job: ${pendingJob.id} (status: ${pendingJob.status})`
+			);
 
 			// Mark job as running (if it wasn't already)
 			if (pendingJob.status !== "running") {
@@ -57,7 +59,9 @@ async function processJobs() {
 					},
 				});
 			} else {
-				console.log(`[Worker] Job ${pendingJob.id} was already running, resuming...`);
+				console.log(
+					`[Worker] Job ${pendingJob.id} was already running, resuming...`
+				);
 			}
 
 			console.log(
@@ -76,22 +80,22 @@ async function processJobs() {
 					shopConfig.bynderBaseUrl
 				);
 
-			// Get admin API using offline session (persists regardless of user browser)
-			console.log(`[Worker] Getting admin API for shop: ${shopConfig.shop}`);
-			const { admin } = await unauthenticated.admin(shopConfig.shop);
-			console.log(`[Worker] Admin API obtained successfully`);
+				// Get admin API using offline session (persists regardless of user browser)
+				console.log(`[Worker] Getting admin API for shop: ${shopConfig.shop}`);
+				const { admin } = await unauthenticated.admin(shopConfig.shop);
+				console.log(`[Worker] Admin API obtained successfully`);
 
-			// Process the sync job
-			// Note: syncBynderAssets will update the job status internally
-			console.log(`[Worker] Starting sync for job ${pendingJob.id}`);
-			await syncBynderAssets({
-				shopId: shopConfig.id,
-				admin,
-				bynderClient,
-				forceImportAll: false, // TODO: Could store this in job data if needed
-				jobId: pendingJob.id, // Pass job ID so sync function can check for cancellation
-			});
-			console.log(`[Worker] Sync completed for job ${pendingJob.id}`);
+				// Process the sync job
+				// Note: syncBynderAssets will update the job status internally
+				console.log(`[Worker] Starting sync for job ${pendingJob.id}`);
+				await syncBynderAssets({
+					shopId: shopConfig.id,
+					admin,
+					bynderClient,
+					forceImportAll: false, // TODO: Could store this in job data if needed
+					jobId: pendingJob.id, // Pass job ID so sync function can check for cancellation
+				});
+				console.log(`[Worker] Sync completed for job ${pendingJob.id}`);
 
 				console.log(`[Worker] Job ${pendingJob.id} completed successfully`);
 			} catch (error) {

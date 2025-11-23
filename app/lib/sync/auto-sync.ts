@@ -89,14 +89,18 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 
 	try {
 		// Query Bynder for assets with any of the configured tags
-		console.log(`[Sync Job ${syncJob.id}] Starting to fetch assets from Bynder...`);
+		console.log(
+			`[Sync Job ${syncJob.id}] Starting to fetch assets from Bynder...`
+		);
 		const allAssets: Array<{ id: string; tags: string[]; version: number }> =
 			[];
 
 		for (const tag of syncTags) {
 			console.log(`[Sync Job ${syncJob.id}] Fetching assets with tag: ${tag}`);
 			const response = await bynderClient.getAllMediaItems({ tags: tag });
-			console.log(`[Sync Job ${syncJob.id}] Found ${response.length} assets with tag: ${tag}`);
+			console.log(
+				`[Sync Job ${syncJob.id}] Found ${response.length} assets with tag: ${tag}`
+			);
 			// Response is now properly typed from getAllMediaItems
 			for (const asset of response) {
 				// Check if asset has at least one of the sync tags
@@ -114,8 +118,10 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 			}
 		}
 
-		console.log(`[Sync Job ${syncJob.id}] Total assets to process: ${allAssets.length}`);
-		
+		console.log(
+			`[Sync Job ${syncJob.id}] Total assets to process: ${allAssets.length}`
+		);
+
 		// Update job with total found
 		await prisma.syncJob.update({
 			where: { id: syncJob.id },
@@ -127,7 +133,9 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		// Process each asset
 		for (const [index, asset] of allAssets.entries()) {
 			if (index % 10 === 0) {
-				console.log(`[Sync Job ${syncJob.id}] Processing asset ${index + 1}/${allAssets.length}: ${asset.id}`);
+				console.log(
+					`[Sync Job ${syncJob.id}] Processing asset ${index + 1}/${allAssets.length}: ${asset.id}`
+				);
 			}
 			// Check for cancellation before processing each asset
 			if (await checkCancellation()) {

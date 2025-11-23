@@ -23,6 +23,7 @@ vi.mock("../../db.server.js", () => {
 			create: vi.fn(),
 			update: vi.fn(),
 			findMany: vi.fn(),
+			findUnique: vi.fn(),
 		},
 		$queryRaw: vi.fn(),
 	};
@@ -53,6 +54,7 @@ const mockPrisma = prisma as unknown as {
 		create: ReturnType<typeof vi.fn>;
 		update: ReturnType<typeof vi.fn>;
 		findMany: ReturnType<typeof vi.fn>;
+		findUnique: ReturnType<typeof vi.fn>;
 	};
 	$queryRaw: ReturnType<typeof vi.fn>;
 };
@@ -175,5 +177,177 @@ describe("syncBynderAssets", () => {
 		expect(result.processed).toBe(1);
 		expect(result.created).toBe(0);
 		expect(result.updated).toBe(0);
+	});
+
+	it("should use existing job when jobId is provided", async () => {
+		const existingJob = {
+			id: "existing-job-123",
+			shopId: "shop-123",
+			status: "pending",
+			startedAt: null,
+		};
+
+		mockPrisma.syncJob.findUnique.mockResolvedValue(existingJob);
+		mockPrisma.syncJob.update.mockResolvedValue({
+			...existingJob,
+			status: "running",
+			startedAt: new Date(),
+		});
+
+		const mockAssets = [
+			{
+				id: "asset-1",
+				tags: ["shopify-sync"],
+				version: 1,
+			},
+		];
+
+		mockBynderClient.getAllMediaItems = vi.fn().mockResolvedValue(mockAssets);
+		mockPrisma.syncedAsset.findUnique.mockResolvedValue(null);
+		mockPrisma.syncedAsset.upsert.mockResolvedValue({
+			id: "synced-1",
+			shopId: "shop-123",
+			bynderAssetId: "asset-1",
+			shopifyFileId: "gid://shopify/File/123",
+		});
+
+		mockPrisma.syncJob.update.mockResolvedValueOnce({
+			...existingJob,
+			status: "running",
+		});
+
+		mockPrisma.syncJob.update.mockResolvedValueOnce({
+			...existingJob,
+			status: "completed",
+		});
+
+		const result = await syncBynderAssets({
+			shopId: "shop-123",
+			admin: mockAdmin,
+			bynderClient: mockBynderClient,
+			jobId: "existing-job-123",
+		});
+
+		expect(mockPrisma.syncJob.findUnique).toHaveBeenCalledWith({
+			where: { id: "existing-job-123" },
+		});
+		expect(mockPrisma.syncJob.create).not.toHaveBeenCalled();
+		expect(result.processed).toBe(1);
+	});
+
+	it("should stop processing when job is cancelled", async () => {
+		const existingJob = {
+			id: "job-123",
+			shopId: "shop-123",
+			status: "pending",
+			startedAt: null,
+		};
+
+		const mockAssets = [
+			{
+				id: "asset-1",
+				tags: ["shopify-sync"],
+				version: 1,
+			},
+			{
+				id: "asset-2",
+				tags: ["shopify-sync"],
+				version: 1,
+			},
+		];
+
+		mockBynderClient.getAllMediaItems = vi.fn().mockResolvedValue(mockAssets);
+		mockPrisma.syncedAsset.findUnique.mockResolvedValue(null);
+
+		// Mock cancellation check - first call returns pending, then cancelled
+		let callCount = 0;
+		mockPrisma.syncJob.findUnique.mockImplementation(
+			(args: { where: { id: string } }) => {
+				if (args.where.id === "job-123") {
+					callCount++;
+					if (callCount === 1) {
+						// First call: get existing job (pending)
+						return Promise.resolve(existingJob);
+					}
+					// Subsequent calls: check for cancellation (cancelled)
+					return Promise.resolve({
+						...existingJob,
+						status: "cancelled",
+					});
+				}
+				return Promise.resolve(null);
+			}
+		);
+
+		mockPrisma.syncJob.update
+			.mockResolvedValueOnce({
+				...existingJob,
+				status: "running",
+				startedAt: new Date(),
+			})
+			.mockResolvedValueOnce({
+				...existingJob,
+				status: "cancelled",
+				completedAt: new Date(),
+			});
+
+		await syncBynderAssets({
+			shopId: "shop-123",
+			admin: mockAdmin,
+			bynderClient: mockBynderClient,
+			jobId: "job-123",
+		});
+
+		// Should have checked for cancellation (at least once for initial check, plus cancellation checks)
+		expect(mockPrisma.syncJob.findUnique).toHaveBeenCalled();
+		// Should have marked job as cancelled
+		expect(mockPrisma.syncJob.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: "job-123" },
+				data: expect.objectContaining({
+					status: "cancelled",
+				}),
+			})
+		);
+	});
+
+	it("should update existing job from pending to running", async () => {
+		const pendingJob = {
+			id: "job-123",
+			shopId: "shop-123",
+			status: "pending",
+			startedAt: null,
+		};
+
+		mockPrisma.syncJob.findUnique.mockResolvedValue(pendingJob);
+		mockPrisma.syncJob.update.mockResolvedValue({
+			...pendingJob,
+			status: "running",
+			startedAt: new Date(),
+		});
+
+		const mockAssets: Array<{ id: string; tags: string[]; version: number }> =
+			[];
+
+		mockBynderClient.getAllMediaItems = vi.fn().mockResolvedValue(mockAssets);
+		mockPrisma.syncJob.update.mockResolvedValue({
+			...pendingJob,
+			status: "completed",
+		});
+
+		await syncBynderAssets({
+			shopId: "shop-123",
+			admin: mockAdmin,
+			bynderClient: mockBynderClient,
+			jobId: "job-123",
+		});
+
+		expect(mockPrisma.syncJob.update).toHaveBeenCalledWith({
+			where: { id: "job-123" },
+			data: {
+				status: "running",
+				startedAt: expect.any(Date),
+			},
+		});
 	});
 });

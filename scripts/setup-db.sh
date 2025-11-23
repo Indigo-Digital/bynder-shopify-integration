@@ -12,3 +12,4 @@ pnpm prisma migrate resolve --rolled-back 20251121225010_remove_oauth_token_fiel
 # Deploy migrations
 pnpm prisma migrate deploy
 
+

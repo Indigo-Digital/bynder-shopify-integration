@@ -34,6 +34,7 @@ primary_region = "iad"
 
 [processes]
   app = "pnpm run docker-start"
+  worker = "pnpm run worker"
 
 [vm]
   memory_mb = 2048

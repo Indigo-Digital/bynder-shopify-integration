@@ -10,6 +10,7 @@
 		"config:use": "shopify app config use",
 		"env": "shopify app env",
 		"start": "react-router-serve ./build/server/index.js",
+		"worker": "tsx app/lib/sync/worker.ts",
 		"docker-start": "pnpm run setup && pnpm run start",
 		"setup": "sh scripts/setup-db.sh",
 		"setup:postgres": "cp prisma/schema.postgresql.prisma prisma/schema.prisma && pnpm run setup",
@@ -44,6 +45,7 @@
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
 		"react-router": "^7.9.3",
+		"tsx": "^4.20.6",
 		"vite-tsconfig-paths": "^5.1.4"
 	},
 	"devDependencies": {
@@ -60,7 +62,6 @@
 		"@vitest/ui": "^4.0.12",
 		"graphql-config": "^5.1.1",
 		"jsdom": "^27.2.0",
-		"tsx": "^4.20.6",
 		"typescript": "^5.9.3",
 		"vite": "^6.3.6",
 		"vitest": "^4.0.12"

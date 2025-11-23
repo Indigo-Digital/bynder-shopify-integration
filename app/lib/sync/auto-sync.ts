@@ -8,6 +8,7 @@ interface SyncOptions {
 	admin: AdminApi;
 	bynderClient: BynderClient;
 	forceImportAll?: boolean; // If true, import all assets even if they already exist
+	jobId?: string; // Optional job ID - if provided, will check for cancellation
 }
 
 /**
@@ -40,15 +41,47 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		return { processed: 0, created: 0, updated: 0, errors: [] };
 	}
 
-	// Create sync job
-	const syncJob = await prisma.syncJob.create({
-		data: {
-			shopId,
-			status: "running",
-			startedAt: new Date(),
-			assetsProcessed: 0,
-		},
-	});
+	// Get or create sync job
+	let syncJob: { id: string; status: string } | null = null;
+	if (options.jobId) {
+		// Job already exists (created by API endpoint)
+		syncJob = await prisma.syncJob.findUnique({
+			where: { id: options.jobId },
+		});
+		if (!syncJob) {
+			throw new Error(`Job ${options.jobId} not found`);
+		}
+		// Update status to running if it was pending
+		if (syncJob.status === "pending") {
+			await prisma.syncJob.update({
+				where: { id: options.jobId },
+				data: {
+					status: "running",
+					startedAt: new Date(),
+				},
+			});
+		}
+	} else {
+		// Create sync job (backward compatibility for direct calls)
+		syncJob = await prisma.syncJob.create({
+			data: {
+				shopId,
+				status: "running",
+				startedAt: new Date(),
+				assetsProcessed: 0,
+			},
+		});
+	}
+
+	// Helper function to check if job was cancelled
+	const checkCancellation = async (): Promise<boolean> => {
+		if (!options.jobId) return false;
+		const job = await prisma.syncJob.findUnique({
+			where: { id: options.jobId },
+			select: { status: true },
+		});
+		return job?.status === "cancelled";
+	};
 
 	const errors: Array<{ assetId: string; error: string }> = [];
 	let created = 0;
@@ -80,6 +113,26 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 
 		// Process each asset
 		for (const asset of allAssets) {
+			// Check for cancellation before processing each asset
+			if (await checkCancellation()) {
+				console.log(
+					`[Sync Job] Job ${syncJob.id} was cancelled, stopping processing`
+				);
+				await prisma.syncJob.update({
+					where: { id: syncJob.id },
+					data: {
+						status: "cancelled",
+						completedAt: new Date(),
+					},
+				});
+				return {
+					processed: allAssets.length,
+					created,
+					updated,
+					errors,
+				};
+			}
+
 			try {
 				// Check if asset already exists
 				const existing = await prisma.syncedAsset.findUnique({
@@ -162,6 +215,30 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 			console.log(
 				`[Sync Job] Job ${syncJob.id} completed successfully: ${created} created, ${updated} updated`
 			);
+		}
+
+		// Check for cancellation one final time before marking as completed
+		if (await checkCancellation()) {
+			console.log(
+				`[Sync Job] Job ${syncJob.id} was cancelled during final check`
+			);
+			await prisma.syncJob.update({
+				where: { id: syncJob.id },
+				data: {
+					status: "cancelled",
+					completedAt: new Date(),
+					assetsProcessed: allAssets.length,
+					assetsCreated: created,
+					assetsUpdated: updated,
+					errors: errors.length > 0 ? JSON.stringify(errors) : null,
+				},
+			});
+			return {
+				processed: allAssets.length,
+				created,
+				updated,
+				errors,
+			};
 		}
 
 		// Update sync job with results

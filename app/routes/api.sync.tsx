@@ -51,7 +51,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		}
 
 		if (assetId) {
-			// Sync single asset
+			// Sync single asset - keep synchronous for quick operations
 			const { fileId, fileUrl } = await uploadBynderAsset(
 				admin,
 				bynderClient,
@@ -91,15 +91,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 			return Response.json({ success: true, fileId, fileUrl });
 		} else {
-			// Sync all assets
-			const result = await syncBynderAssets({
-				shopId: shopConfig.id,
-				admin,
-				bynderClient,
-				forceImportAll,
+			// Sync all assets - create background job and return immediately
+			const syncJob = await prisma.syncJob.create({
+				data: {
+					shopId: shopConfig.id,
+					status: "pending",
+					assetsProcessed: 0,
+				},
 			});
 
-			return Response.json({ success: true, ...result });
+			return Response.json({
+				success: true,
+				jobId: syncJob.id,
+				message: "Sync job created. Processing in background.",
+			});
 		}
 	} catch (error) {
 		console.error("Sync error:", error);

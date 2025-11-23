@@ -59,10 +59,14 @@ export default function SyncDashboard() {
 		);
 	};
 
-	// Reload data when sync completes
+	const handleCancelJob = (jobId: string) => {
+		fetcher.submit({ jobId }, { method: "POST", action: "/api/sync/cancel" });
+	};
+
+	// Reload data when sync or cancel completes
 	useEffect(() => {
 		if (fetcher.state === "idle" && fetcher.data) {
-			// Wait a bit for the sync job to be saved, then reload
+			// Wait a bit for the job to be saved, then reload
 			const timer = setTimeout(() => {
 				revalidator.revalidate();
 			}, 500);
@@ -77,21 +81,46 @@ export default function SyncDashboard() {
 			return; // No running jobs, don't poll
 		}
 
-		// Poll every 2 seconds when there's a running job
+		// Poll every 5 seconds when there's a running job
 		const interval = setInterval(() => {
 			revalidator.revalidate();
-		}, 2000);
+		}, 5000);
 
 		return () => clearInterval(interval);
 	}, [syncJobs, revalidator]);
 
 	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+	const [currentTime, setCurrentTime] = useState(new Date());
+
+	// Update current time every second for elapsed time calculation
+	useEffect(() => {
+		const timer = setInterval(() => {
+			setCurrentTime(new Date());
+		}, 1000);
+		return () => clearInterval(timer);
+	}, []);
 
 	const showSuccess =
 		fetcher.data && "success" in fetcher.data && fetcher.data.success;
 	const showError = fetcher.data && "error" in fetcher.data;
 	const syncResult =
 		fetcher.data && "success" in fetcher.data ? fetcher.data : null;
+
+	// Find running sync job
+	const runningJob = syncJobs.find((job) => job.status === "running");
+	const isPolling = runningJob !== undefined;
+
+	// Calculate elapsed time helper
+	const formatElapsedTime = (startedAt: Date | null): string => {
+		if (!startedAt) return "";
+		const elapsed = Math.floor(
+			(currentTime.getTime() - new Date(startedAt).getTime()) / 1000
+		);
+		if (elapsed < 60) return `${elapsed}s`;
+		const minutes = Math.floor(elapsed / 60);
+		const seconds = elapsed % 60;
+		return `${minutes}m ${seconds}s`;
+	};
 
 	if (!shopConfig) {
 		return (
@@ -108,6 +137,51 @@ export default function SyncDashboard() {
 
 	return (
 		<s-page heading="Sync Dashboard">
+			{isPolling && runningJob && (
+				<s-banner tone="info">
+					<div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+						<span
+							style={{
+								display: "inline-block",
+								width: "16px",
+								height: "16px",
+								border: "2px solid #0066cc",
+								borderTopColor: "transparent",
+								borderRadius: "50%",
+								animation: "spin 1s linear infinite",
+							}}
+						/>
+						<strong>Sync in progress...</strong>
+						{runningJob.startedAt && (
+							<span style={{ marginLeft: "0.5rem" }}>
+								({formatElapsedTime(runningJob.startedAt)} elapsed)
+							</span>
+						)}
+						{runningJob.assetsProcessed > 0 && (
+							<span style={{ marginLeft: "0.5rem" }}>
+								- {runningJob.assetsProcessed} asset
+								{runningJob.assetsProcessed !== 1 ? "s" : ""} processed
+							</span>
+						)}
+						<span
+							style={{
+								marginLeft: "0.5rem",
+								fontSize: "0.875rem",
+								opacity: 0.8,
+							}}
+						>
+							(Refreshing every 5 seconds...)
+						</span>
+					</div>
+					<style>
+						{`
+							@keyframes spin {
+								to { transform: rotate(360deg); }
+							}
+						`}
+					</style>
+				</s-banner>
+			)}
 			{syncResult && showSuccess && (
 				<s-banner
 					tone={
@@ -158,6 +232,7 @@ export default function SyncDashboard() {
 
 			<s-button
 				slot="primary-action"
+				variant="primary"
 				onClick={handleSync}
 				disabled={fetcher.state !== "idle"}
 			>
@@ -288,6 +363,15 @@ export default function SyncDashboard() {
 									>
 										Errors
 									</th>
+									<th
+										style={{
+											padding: "0.75rem",
+											textAlign: "center",
+											fontWeight: "600",
+										}}
+									>
+										Actions
+									</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -301,29 +385,54 @@ export default function SyncDashboard() {
 											}}
 										>
 											<td style={{ padding: "0.75rem" }}>
-												<span
+												<div
 													style={{
-														padding: "0.25rem 0.5rem",
-														borderRadius: "4px",
-														fontSize: "0.75rem",
-														fontWeight: "600",
-														textTransform: "uppercase",
-														backgroundColor:
-															job.status === "completed"
-																? "#d4edda"
-																: job.status === "failed"
-																	? "#f8d7da"
-																	: "#fff3cd",
-														color:
-															job.status === "completed"
-																? "#155724"
-																: job.status === "failed"
-																	? "#721c24"
-																	: "#856404",
+														display: "flex",
+														alignItems: "center",
+														gap: "0.5rem",
 													}}
 												>
-													{job.status}
-												</span>
+													{job.status === "running" && (
+														<span
+															style={{
+																display: "inline-block",
+																width: "12px",
+																height: "12px",
+																border: "2px solid #856404",
+																borderTopColor: "transparent",
+																borderRadius: "50%",
+																animation: "spin 1s linear infinite",
+															}}
+														/>
+													)}
+													<span
+														style={{
+															padding: "0.25rem 0.5rem",
+															borderRadius: "4px",
+															fontSize: "0.75rem",
+															fontWeight: "600",
+															textTransform: "uppercase",
+															backgroundColor:
+																job.status === "completed"
+																	? "#d4edda"
+																	: job.status === "failed"
+																		? "#f8d7da"
+																		: job.status === "cancelled"
+																			? "#e2e3e5"
+																			: "#fff3cd",
+															color:
+																job.status === "completed"
+																	? "#155724"
+																	: job.status === "failed"
+																		? "#721c24"
+																		: job.status === "cancelled"
+																			? "#383d41"
+																			: "#856404",
+														}}
+													>
+														{job.status}
+													</span>
+												</div>
 											</td>
 											<td style={{ padding: "0.75rem", whiteSpace: "nowrap" }}>
 												{job.startedAt
@@ -331,15 +440,47 @@ export default function SyncDashboard() {
 													: "-"}
 											</td>
 											<td style={{ padding: "0.75rem", whiteSpace: "nowrap" }}>
-												{job.completedAt
-													? new Date(job.completedAt).toLocaleString()
-													: job.status === "running"
-														? "In progress..."
-														: "-"}
+												{job.completedAt ? (
+													new Date(job.completedAt).toLocaleString()
+												) : job.status === "running" ? (
+													<div>
+														<div>In progress...</div>
+														{job.startedAt && (
+															<div
+																style={{
+																	fontSize: "0.75rem",
+																	color: "#666",
+																	marginTop: "0.25rem",
+																}}
+															>
+																{formatElapsedTime(job.startedAt)} elapsed
+															</div>
+														)}
+													</div>
+												) : (
+													"-"
+												)}
 											</td>
 											<td style={{ padding: "0.75rem", textAlign: "right" }}>
 												{job.assetsProcessed > 0 ? (
-													<strong>{job.assetsProcessed}</strong>
+													<div>
+														<strong>{job.assetsProcessed}</strong>
+														{job.status === "running" && (
+															<div
+																style={{
+																	fontSize: "0.75rem",
+																	color: "#666",
+																	marginTop: "0.25rem",
+																}}
+															>
+																processing...
+															</div>
+														)}
+													</div>
+												) : job.status === "running" ? (
+													<span style={{ color: "#999", fontStyle: "italic" }}>
+														Starting...
+													</span>
 												) : (
 													"-"
 												)}
@@ -509,11 +650,46 @@ export default function SyncDashboard() {
 													);
 												})()}
 											</td>
+											<td style={{ padding: "0.75rem", textAlign: "center" }}>
+												{job.status === "running" ||
+												job.status === "pending" ? (
+													<button
+														type="button"
+														onClick={() => handleCancelJob(job.id)}
+														disabled={fetcher.state !== "idle"}
+														style={{
+															padding: "0.5rem 1rem",
+															backgroundColor: "#dc3545",
+															color: "white",
+															border: "none",
+															borderRadius: "4px",
+															cursor:
+																fetcher.state !== "idle"
+																	? "not-allowed"
+																	: "pointer",
+															fontSize: "0.875rem",
+															fontWeight: "600",
+															opacity: fetcher.state !== "idle" ? 0.6 : 1,
+														}}
+													>
+														Cancel
+													</button>
+												) : (
+													<span style={{ color: "#999" }}>-</span>
+												)}
+											</td>
 										</tr>
 									)
 								)}
 							</tbody>
 						</table>
+						<style>
+							{`
+								@keyframes spin {
+									to { transform: rotate(360deg); }
+								}
+							`}
+						</style>
 						{syncJobs.some(
 							(job) => job.status === "completed" && job.assetsProcessed > 0
 						) && (

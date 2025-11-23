@@ -23,6 +23,9 @@ RUN echo 'provider = "postgresql"' > prisma/migrations/migration_lock.toml
 # Make setup script executable
 RUN chmod +x scripts/setup-db.sh
 
+# Generate Prisma Client before building
+RUN pnpm prisma generate
+
 RUN pnpm run build
 
 RUN CI=true pnpm prune --prod

@@ -310,11 +310,11 @@ export async function uploadBynderAsset(
 	}
 
 	// Helper function to create FormData and upload body for each retry attempt
-	// This is necessary because ReadableStreams can only be consumed once
+	// This is necessary because streams/buffers can only be consumed once
 	const createUploadBody = (): {
 		body: BodyInit;
 		headers: HeadersInit;
-		isPolyfill: boolean;
+		needsDuplex: boolean;
 	} => {
 		const retryFormData = new FormData();
 
@@ -323,12 +323,12 @@ export async function uploadBynderAsset(
 			"_boundary" in retryFormData ||
 			typeof (retryFormData as { _streams?: unknown })._streams !== "undefined";
 
-		// Add parameters from staged upload first (S3 requires specific order)
+		// Add parameters from staged upload first (S3/GCS requires specific order)
 		for (const param of stagedTarget.parameters) {
 			retryFormData.append(param.name, param.value);
 		}
 
-		// Add the file last - this is critical for S3 uploads
+		// Add the file last - this is critical for S3/GCS uploads
 		if (retryIsPolyfill) {
 			// form-data polyfill expects Buffer or stream, not File
 			const polyfillFormData = retryFormData as unknown as {
@@ -357,38 +357,126 @@ export async function uploadBynderAsset(
 		// Create upload body and headers
 		let retryUploadBody: BodyInit;
 		let retryUploadHeaders: HeadersInit = {};
+		let needsDuplex = false;
 
 		if (retryIsPolyfill) {
 			const polyfillFormData = retryFormData as unknown as {
 				getHeaders?: () => HeadersInit;
 			} & NodeJS.ReadableStream;
 
+			// Get headers if available
 			if (typeof polyfillFormData.getHeaders === "function") {
 				retryUploadHeaders = polyfillFormData.getHeaders();
 			}
 
-			const nodeStream = polyfillFormData as NodeJS.ReadableStream;
+			// For form-data polyfill, convert Node.js stream to Web ReadableStream
+			// Use a more robust conversion that handles errors and cleanup properly
+			const nodeStream = polyfillFormData as NodeJS.ReadableStream & {
+				destroy?: (error?: Error) => void;
+				pause?: () => void;
+				resume?: () => void;
+			};
+
+			// Pause the stream to ensure we can set up handlers before it starts flowing
+			if (typeof nodeStream.pause === "function") {
+				nodeStream.pause();
+			}
+
+			// Convert Node.js ReadableStream to Web ReadableStream
+			// This approach is more reliable in worker/serverless environments
+			let streamStarted = false;
+
 			retryUploadBody = new ReadableStream({
 				start(controller) {
-					nodeStream.on("data", (chunk: Buffer) => {
-						controller.enqueue(new Uint8Array(chunk));
-					});
-					nodeStream.on("end", () => {
-						controller.close();
-					});
-					nodeStream.on("error", (err) => {
-						controller.error(err);
-					});
+					if (streamStarted) {
+						// Prevent multiple starts
+						return;
+					}
+					streamStarted = true;
+
+					// Set up error handler first
+					const errorHandler = (err: Error) => {
+						try {
+							controller.error(err);
+						} catch {
+							// Controller might already be errored
+						}
+					};
+					nodeStream.on("error", errorHandler);
+
+					// Handle stream end
+					const endHandler = () => {
+						try {
+							// Clean up all listeners
+							nodeStream.removeListener("error", errorHandler);
+							nodeStream.removeListener("data", dataHandler);
+							nodeStream.removeListener("end", endHandler);
+							controller.close();
+						} catch (_err) {
+							// Ignore errors on close (stream might already be closed)
+						}
+					};
+					nodeStream.on("end", endHandler);
+
+					// Handle data chunks
+					const dataHandler = (chunk: Buffer) => {
+						try {
+							// Convert Buffer to Uint8Array for Web Streams
+							const uint8Array =
+								chunk instanceof Uint8Array
+									? chunk
+									: new Uint8Array(
+											(chunk as Buffer).buffer,
+											(chunk as Buffer).byteOffset,
+											(chunk as Buffer).byteLength
+										);
+							controller.enqueue(uint8Array);
+						} catch (err) {
+							// Clean up listeners on error
+							nodeStream.removeListener("error", errorHandler);
+							nodeStream.removeListener("data", dataHandler);
+							nodeStream.removeListener("end", endHandler);
+							controller.error(
+								err instanceof Error ? err : new Error(String(err))
+							);
+						}
+					};
+					nodeStream.on("data", dataHandler);
+
+					// Resume the stream now that handlers are attached
+					if (typeof nodeStream.resume === "function") {
+						nodeStream.resume();
+					}
+				},
+				cancel(reason) {
+					// Clean up Node.js stream if fetch is cancelled
+					try {
+						if (typeof nodeStream.destroy === "function") {
+							nodeStream.destroy(reason instanceof Error ? reason : undefined);
+						} else if (
+							typeof (nodeStream as { removeAllListeners?: () => void })
+								.removeAllListeners === "function"
+						) {
+							(
+								nodeStream as { removeAllListeners: () => void }
+							).removeAllListeners();
+						}
+					} catch {
+						// Ignore cleanup errors
+					}
 				},
 			});
+			needsDuplex = true;
 		} else {
+			// Native FormData - use directly
 			retryUploadBody = retryFormData;
+			needsDuplex = false;
 		}
 
 		return {
 			body: retryUploadBody,
 			headers: retryUploadHeaders,
-			isPolyfill: retryIsPolyfill,
+			needsDuplex,
 		};
 	};
 
@@ -400,11 +488,11 @@ export async function uploadBynderAsset(
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 		try {
 			// Create fresh FormData and upload body for each retry attempt
-			// This is critical because ReadableStreams can only be consumed once
+			// This is critical because streams/buffers can only be consumed once
 			const {
 				body: uploadBody,
 				headers: uploadHeaders,
-				isPolyfill: retryIsPolyfill,
+				needsDuplex,
 			} = createUploadBody();
 
 			// Create abort controller for timeout (5 minutes for large files)
@@ -417,14 +505,48 @@ export async function uploadBynderAsset(
 				);
 			}
 
-			uploadResponse = await fetch(stagedTarget.url, {
+			// Build fetch options
+			const fetchOptions: RequestInit & { duplex?: "half" } = {
 				method: "POST",
 				body: uploadBody,
 				headers: uploadHeaders,
-				// Required when using ReadableStream as body in Node.js fetch
-				...(retryIsPolyfill && { duplex: "half" as const }),
 				signal: controller.signal,
-			});
+			};
+
+			// Add duplex mode if needed (for form-data polyfill streams)
+			if (needsDuplex) {
+				fetchOptions.duplex = "half";
+			}
+
+			// Log upload attempt details (without sensitive data)
+			if (attempt === 1) {
+				console.log(
+					`[Upload] Starting upload to Shopify staged URL (file: ${sanitizedStagedFilename}, size: ${buffer.length} bytes, needsDuplex: ${needsDuplex})`
+				);
+			}
+
+			try {
+				uploadResponse = await fetch(stagedTarget.url, fetchOptions);
+			} catch (fetchError) {
+				// Enhanced error logging for debugging
+				const errorDetails =
+					fetchError instanceof Error
+						? {
+								name: fetchError.name,
+								message: fetchError.message,
+								stack: fetchError.stack,
+								cause: fetchError.cause,
+							}
+						: { error: String(fetchError) };
+
+				console.error(
+					`[Upload] Fetch error on attempt ${attempt}/${MAX_RETRIES}:`,
+					JSON.stringify(errorDetails, null, 2)
+				);
+
+				// Re-throw to be handled by retry logic
+				throw fetchError;
+			}
 
 			clearTimeout(timeoutId);
 			lastError = null;

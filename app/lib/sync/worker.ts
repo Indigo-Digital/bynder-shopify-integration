@@ -140,20 +140,29 @@ async function startWorker() {
 		console.log("[Worker] Database connected successfully");
 	} catch (dbError) {
 		console.error("[Worker] Database connection failed:", dbError);
-		console.error("[Worker] Error details:", dbError instanceof Error ? dbError.stack : String(dbError));
+		console.error(
+			"[Worker] Error details:",
+			dbError instanceof Error ? dbError.stack : String(dbError)
+		);
 		process.exit(1);
 	}
 
 	console.log("[Worker] Starting job processing loop...");
 	processJobs().catch((error) => {
 		console.error("[Worker] Fatal error in processJobs:", error);
-		console.error("[Worker] Error stack:", error instanceof Error ? error.stack : "No stack");
+		console.error(
+			"[Worker] Error stack:",
+			error instanceof Error ? error.stack : "No stack"
+		);
 		process.exit(1);
 	});
 }
 
 startWorker().catch((error) => {
 	console.error("[Worker] Fatal error starting worker:", error);
-	console.error("[Worker] Error stack:", error instanceof Error ? error.stack : "No stack");
+	console.error(
+		"[Worker] Error stack:",
+		error instanceof Error ? error.stack : "No stack"
+	);
 	process.exit(1);
 });

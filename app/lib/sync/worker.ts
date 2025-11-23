@@ -16,7 +16,9 @@ async function processJobs() {
 	while (true) {
 		try {
 			// Find pending jobs (oldest first)
-			// Also check for stuck running jobs (running but no progress for > 5 minutes)
+			// Also check for stuck running jobs:
+			// - Running jobs without startedAt (shouldn't happen, but handle it)
+			// - Running jobs that started more than 5 minutes ago
 			const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
 			const pendingJob = await prisma.syncJob.findFirst({
 				where: {
@@ -24,8 +26,12 @@ async function processJobs() {
 						{ status: "pending" },
 						{
 							status: "running",
+							startedAt: null, // Running but never had startedAt set (stuck)
+						},
+						{
+							status: "running",
 							startedAt: {
-								lt: fiveMinutesAgo, // Started more than 5 minutes ago
+								lt: fiveMinutesAgo, // Started more than 5 minutes ago (stuck)
 							},
 						},
 					],

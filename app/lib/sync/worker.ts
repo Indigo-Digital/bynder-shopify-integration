@@ -1,10 +1,15 @@
+// Log immediately before any imports to confirm script is executing
+console.log("[Worker] Worker script starting...");
+console.log("[Worker] Node version:", process.version);
+console.log("[Worker] Current directory:", process.cwd());
+console.log("[Worker] Loading imports...");
+
 import prisma from "../../db.server.js";
 import { unauthenticated } from "../../shopify.server.js";
 import { BynderClient } from "../bynder/client.js";
 import { syncBynderAssets } from "./auto-sync.js";
 
-// Log immediately to confirm worker is starting
-console.log("[Worker] Worker script loaded, imports initialized");
+console.log("[Worker] Imports loaded successfully");
 
 const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
 

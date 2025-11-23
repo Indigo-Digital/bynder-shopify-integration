@@ -295,23 +295,50 @@ export async function uploadBynderAsset(
 
 	// Upload to staged URL
 	// Native FormData: fetch will automatically set Content-Type with boundary
-	// form-data polyfill: need to get headers manually
-	const uploadOptions: RequestInit = {
-		method: "POST",
-		body: formData as unknown as BodyInit,
-	};
+	// form-data polyfill: need to convert stream to buffer and get headers manually
+	let uploadBody: BodyInit;
+	let uploadHeaders: HeadersInit = {};
 
 	if (isPolyfill) {
-		// form-data polyfill provides getHeaders() method
+		// form-data polyfill needs to be converted to a buffer
 		const polyfillFormData = formData as unknown as {
 			getHeaders?: () => HeadersInit;
-		};
+			getBuffer?: () => Promise<Buffer>;
+		} & NodeJS.ReadableStream;
+
+		// Get headers first
 		if (typeof polyfillFormData.getHeaders === "function") {
-			uploadOptions.headers = polyfillFormData.getHeaders();
+			uploadHeaders = polyfillFormData.getHeaders();
 		}
+
+		// Convert form-data stream to buffer
+		if (typeof polyfillFormData.getBuffer === "function") {
+			// form-data v4+ has getBuffer()
+			const buffer = await polyfillFormData.getBuffer();
+			uploadBody = new Uint8Array(buffer);
+		} else {
+			// form-data v2/v3 - convert stream to buffer
+			const chunks: Buffer[] = [];
+
+			await new Promise<void>((resolve, reject) => {
+				polyfillFormData.on("data", (chunk: Buffer) => chunks.push(chunk));
+				polyfillFormData.on("end", () => resolve());
+				polyfillFormData.on("error", reject);
+			});
+
+			const buffer = Buffer.concat(chunks);
+			uploadBody = new Uint8Array(buffer);
+		}
+	} else {
+		// Native FormData - fetch handles it automatically
+		uploadBody = formData;
 	}
 
-	const uploadResponse = await fetch(stagedTarget.url, uploadOptions);
+	const uploadResponse = await fetch(stagedTarget.url, {
+		method: "POST",
+		body: uploadBody,
+		headers: uploadHeaders,
+	});
 
 	if (!uploadResponse.ok) {
 		const statusText = uploadResponse.statusText || "Unknown error";

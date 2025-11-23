@@ -336,6 +336,8 @@ export async function uploadBynderAsset(
 		method: "POST",
 		body: uploadBody,
 		headers: uploadHeaders,
+		// Required when using ReadableStream as body in Node.js fetch
+		...(isPolyfill && { duplex: "half" as const }),
 	});
 
 	if (!uploadResponse.ok) {

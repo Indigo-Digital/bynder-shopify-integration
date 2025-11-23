@@ -309,45 +309,6 @@ export async function uploadBynderAsset(
 		formData.append("file", fileToUpload);
 	}
 
-	// Upload to staged URL
-	// Native FormData: fetch will automatically set Content-Type with boundary
-	// form-data polyfill: must send as stream to preserve signature, convert Node.js stream to web ReadableStream
-	let uploadBody: BodyInit;
-	let uploadHeaders: HeadersInit = {};
-
-	if (isPolyfill) {
-		// form-data polyfill must be sent as stream to preserve Shopify's signature
-		// Converting to buffer breaks the signature because it changes the exact bytes
-		const polyfillFormData = formData as unknown as {
-			getHeaders?: () => HeadersInit;
-		} & NodeJS.ReadableStream;
-
-		// Get headers first
-		if (typeof polyfillFormData.getHeaders === "function") {
-			uploadHeaders = polyfillFormData.getHeaders();
-		}
-
-		// Convert Node.js ReadableStream to web ReadableStream for fetch
-		// This preserves the exact stream data that Shopify signed
-		const nodeStream = polyfillFormData as NodeJS.ReadableStream;
-		uploadBody = new ReadableStream({
-			start(controller) {
-				nodeStream.on("data", (chunk: Buffer) => {
-					controller.enqueue(new Uint8Array(chunk));
-				});
-				nodeStream.on("end", () => {
-					controller.close();
-				});
-				nodeStream.on("error", (err) => {
-					controller.error(err);
-				});
-			},
-		});
-	} else {
-		// Native FormData - fetch handles it automatically
-		uploadBody = formData;
-	}
-
 	// Helper function to create FormData and upload body for each retry attempt
 	// This is necessary because ReadableStreams can only be consumed once
 	const createUploadBody = (): {
@@ -440,8 +401,11 @@ export async function uploadBynderAsset(
 		try {
 			// Create fresh FormData and upload body for each retry attempt
 			// This is critical because ReadableStreams can only be consumed once
-			const { body: uploadBody, headers: uploadHeaders, isPolyfill: retryIsPolyfill } =
-				createUploadBody();
+			const {
+				body: uploadBody,
+				headers: uploadHeaders,
+				isPolyfill: retryIsPolyfill,
+			} = createUploadBody();
 
 			// Create abort controller for timeout (5 minutes for large files)
 			const controller = new AbortController();

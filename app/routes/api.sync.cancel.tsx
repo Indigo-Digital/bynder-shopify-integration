@@ -24,9 +24,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			return Response.json({ error: "Shop not found" }, { status: 404 });
 		}
 
-		// Get job ID from request body
-		const body = await request.json().catch(() => ({}));
-		const jobId = body.jobId;
+		// Get job ID from request body (support both JSON and FormData)
+		let jobId: string | null = null;
+		const contentType = request.headers.get("content-type");
+		if (contentType?.includes("application/json")) {
+			const body = await request.json().catch(() => ({}));
+			jobId = body.jobId;
+		} else {
+			const formData = await request.formData();
+			jobId = formData.get("jobId")?.toString() || null;
+		}
 
 		if (!jobId || typeof jobId !== "string") {
 			return Response.json({ error: "jobId is required" }, { status: 400 });

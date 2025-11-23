@@ -60,7 +60,11 @@ export default function SyncDashboard() {
 	};
 
 	const handleCancelJob = (jobId: string) => {
-		fetcher.submit({ jobId }, { method: "POST", action: "/api/sync/cancel" });
+		console.log("[UI] Cancelling job:", jobId);
+		fetcher.submit(
+			{ jobId },
+			{ method: "POST", action: "/api/sync/cancel" }
+		);
 	};
 
 	// Reload data when sync or cancel completes
@@ -221,7 +225,9 @@ export default function SyncDashboard() {
 
 			{showError && (
 				<s-banner tone="critical">
-					Sync failed:{" "}
+					{fetcher.formAction === "/api/sync/cancel"
+						? "Cancel failed: "
+						: "Sync failed: "}
 					{typeof fetcher.data === "object" &&
 					fetcher.data !== null &&
 					"error" in fetcher.data

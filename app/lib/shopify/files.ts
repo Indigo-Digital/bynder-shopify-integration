@@ -348,6 +348,89 @@ export async function uploadBynderAsset(
 		uploadBody = formData;
 	}
 
+	// Helper function to create FormData and upload body for each retry attempt
+	// This is necessary because ReadableStreams can only be consumed once
+	const createUploadBody = (): {
+		body: BodyInit;
+		headers: HeadersInit;
+		isPolyfill: boolean;
+	} => {
+		const retryFormData = new FormData();
+
+		// Detect if we're using the form-data polyfill (has _boundary property) vs native FormData
+		const retryIsPolyfill =
+			"_boundary" in retryFormData ||
+			typeof (retryFormData as { _streams?: unknown })._streams !== "undefined";
+
+		// Add parameters from staged upload first (S3 requires specific order)
+		for (const param of stagedTarget.parameters) {
+			retryFormData.append(param.name, param.value);
+		}
+
+		// Add the file last - this is critical for S3 uploads
+		if (retryIsPolyfill) {
+			// form-data polyfill expects Buffer or stream, not File
+			const polyfillFormData = retryFormData as unknown as {
+				append: (
+					name: string,
+					value: Buffer,
+					options?: { filename?: string; contentType?: string }
+				) => void;
+			};
+			polyfillFormData.append("file", buffer, {
+				filename: sanitizedStagedFilename,
+				contentType: contentType,
+			});
+		} else {
+			// Native FormData (Node.js 20+) supports File objects
+			const fileToUpload = new File(
+				[new Uint8Array(buffer)],
+				sanitizedStagedFilename,
+				{
+					type: contentType,
+				}
+			);
+			retryFormData.append("file", fileToUpload);
+		}
+
+		// Create upload body and headers
+		let retryUploadBody: BodyInit;
+		let retryUploadHeaders: HeadersInit = {};
+
+		if (retryIsPolyfill) {
+			const polyfillFormData = retryFormData as unknown as {
+				getHeaders?: () => HeadersInit;
+			} & NodeJS.ReadableStream;
+
+			if (typeof polyfillFormData.getHeaders === "function") {
+				retryUploadHeaders = polyfillFormData.getHeaders();
+			}
+
+			const nodeStream = polyfillFormData as NodeJS.ReadableStream;
+			retryUploadBody = new ReadableStream({
+				start(controller) {
+					nodeStream.on("data", (chunk: Buffer) => {
+						controller.enqueue(new Uint8Array(chunk));
+					});
+					nodeStream.on("end", () => {
+						controller.close();
+					});
+					nodeStream.on("error", (err) => {
+						controller.error(err);
+					});
+				},
+			});
+		} else {
+			retryUploadBody = retryFormData;
+		}
+
+		return {
+			body: retryUploadBody,
+			headers: retryUploadHeaders,
+			isPolyfill: retryIsPolyfill,
+		};
+	};
+
 	// Retry logic for transient network failures
 	const MAX_RETRIES = 3;
 	let uploadResponse: Response | null = null;
@@ -355,6 +438,11 @@ export async function uploadBynderAsset(
 
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 		try {
+			// Create fresh FormData and upload body for each retry attempt
+			// This is critical because ReadableStreams can only be consumed once
+			const { body: uploadBody, headers: uploadHeaders, isPolyfill: retryIsPolyfill } =
+				createUploadBody();
+
 			// Create abort controller for timeout (5 minutes for large files)
 			const controller = new AbortController();
 			const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
@@ -370,7 +458,7 @@ export async function uploadBynderAsset(
 				body: uploadBody,
 				headers: uploadHeaders,
 				// Required when using ReadableStream as body in Node.js fetch
-				...(isPolyfill && { duplex: "half" as const }),
+				...(retryIsPolyfill && { duplex: "half" as const }),
 				signal: controller.signal,
 			});
 

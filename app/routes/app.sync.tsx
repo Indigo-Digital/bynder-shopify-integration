@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import prisma from "../db.server.js";
@@ -48,6 +48,10 @@ export default function SyncDashboard() {
 	const fetcher = useFetcher();
 	const revalidator = useRevalidator();
 
+	// All state hooks must be declared before any useEffect hooks
+	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+	const [currentTime, setCurrentTime] = useState(new Date());
+
 	const handleSync = () => {
 		fetcher.submit({}, { method: "POST", action: "/api/sync" });
 	};
@@ -76,8 +80,12 @@ export default function SyncDashboard() {
 	}, [fetcher.state, fetcher.data, revalidator]);
 
 	// Poll for running sync jobs - only when there's a running job
+	// Use useMemo to stabilize the check and prevent unnecessary effect re-runs
+	const hasRunningJob = useMemo(
+		() => syncJobs.some((job) => job.status === "running"),
+		[syncJobs]
+	);
 	useEffect(() => {
-		const hasRunningJob = syncJobs.some((job) => job.status === "running");
 		if (!hasRunningJob) {
 			return; // No running jobs, don't poll
 		}
@@ -88,10 +96,7 @@ export default function SyncDashboard() {
 		}, 5000);
 
 		return () => clearInterval(interval);
-	}, [syncJobs, revalidator]);
-
-	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
-	const [currentTime, setCurrentTime] = useState(new Date());
+	}, [hasRunningJob, revalidator]);
 
 	// Update current time every second for elapsed time calculation
 	useEffect(() => {

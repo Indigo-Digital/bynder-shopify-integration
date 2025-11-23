@@ -348,33 +348,66 @@ export async function uploadBynderAsset(
 		uploadBody = formData;
 	}
 
+	// Retry logic for transient network failures
+	const MAX_RETRIES = 3;
 	let uploadResponse: Response;
-	try {
-		// Create abort controller for timeout (5 minutes for large files)
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+	let lastError: Error | null = null;
 
-		uploadResponse = await fetch(stagedTarget.url, {
-			method: "POST",
-			body: uploadBody,
-			headers: uploadHeaders,
-			// Required when using ReadableStream as body in Node.js fetch
-			...(isPolyfill && { duplex: "half" as const }),
-			signal: controller.signal,
-		});
+	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			// Create abort controller for timeout (5 minutes for large files)
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-		clearTimeout(timeoutId);
-	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		// Check if it's an abort error (timeout or cancelled)
-		if (error instanceof Error && error.name === "AbortError") {
+			if (attempt > 1) {
+				console.log(
+					`[Upload] Retry attempt ${attempt}/${MAX_RETRIES} for file upload to Shopify`
+				);
+			}
+
+			uploadResponse = await fetch(stagedTarget.url, {
+				method: "POST",
+				body: uploadBody,
+				headers: uploadHeaders,
+				// Required when using ReadableStream as body in Node.js fetch
+				...(isPolyfill && { duplex: "half" as const }),
+				signal: controller.signal,
+			});
+
+			clearTimeout(timeoutId);
+			lastError = null;
+			break; // Success, exit retry loop
+		} catch (error) {
+			lastError = error instanceof Error ? error : new Error(String(error));
+			const errorMessage = lastError.message;
+
+			// Don't retry on timeout or abort errors
+			if (lastError.name === "AbortError") {
+				throw new Error(
+					`Upload timeout: File upload to Shopify took longer than 5 minutes. This may indicate a network issue or the file is too large. URL: ${stagedTarget.url}`
+				);
+			}
+
+			// Retry on network errors (transient failures)
+			if (attempt < MAX_RETRIES) {
+				const waitTime = attempt * 1000; // Exponential backoff: 1s, 2s, 3s
+				console.log(
+					`[Upload] Network error (attempt ${attempt}/${MAX_RETRIES}): ${errorMessage}. Retrying in ${waitTime}ms...`
+				);
+				await new Promise((resolve) => setTimeout(resolve, waitTime));
+				continue;
+			}
+
+			// Final attempt failed
 			throw new Error(
-				`Upload timeout: File upload to Shopify took longer than 5 minutes. This may indicate a network issue or the file is too large. URL: ${stagedTarget.url}`
+				`Network error uploading file to Shopify after ${MAX_RETRIES} attempts: ${errorMessage}. URL: ${stagedTarget.url}`
 			);
 		}
-		// Generic network error
+	}
+
+	if (!uploadResponse) {
 		throw new Error(
-			`Network error uploading file to Shopify: ${errorMessage}. URL: ${stagedTarget.url}`
+			`Failed to upload file after ${MAX_RETRIES} attempts: ${lastError?.message || "Unknown error"}`
 		);
 	}
 

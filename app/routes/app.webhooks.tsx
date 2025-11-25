@@ -38,47 +38,71 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	// Get webhook subscription (most recent one)
 	const webhookSubscription = shopConfig.webhookSubscriptions[0] || null;
 
-	// Get webhook stats
-	const totalEvents = await prisma.webhookEvent.count({
-		where: { shopId: shopConfig.id },
-	});
+	// Get webhook stats (handle case where table doesn't exist yet)
+	let totalEvents = 0;
+	let successCount = 0;
+	let failureCount = 0;
+	let eventsLast24h = 0;
+	let lastEvent = null;
+	let recentEvents: Array<{
+		id: string;
+		eventType: string;
+		assetId: string | null;
+		status: string;
+		payload: string;
+		error: string | null;
+		processedAt: Date | null;
+		createdAt: Date;
+	}> = [];
 
-	const successCount = await prisma.webhookEvent.count({
-		where: {
-			shopId: shopConfig.id,
-			status: "success",
-		},
-	});
+	try {
+		totalEvents = await prisma.webhookEvent.count({
+			where: { shopId: shopConfig.id },
+		});
 
-	const failureCount = await prisma.webhookEvent.count({
-		where: {
-			shopId: shopConfig.id,
-			status: "failed",
-		},
-	});
+		successCount = await prisma.webhookEvent.count({
+			where: {
+				shopId: shopConfig.id,
+				status: "success",
+			},
+		});
 
-	const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
-	const eventsLast24h = await prisma.webhookEvent.count({
-		where: {
-			shopId: shopConfig.id,
-			createdAt: { gte: last24Hours },
-		},
-	});
+		failureCount = await prisma.webhookEvent.count({
+			where: {
+				shopId: shopConfig.id,
+				status: "failed",
+			},
+		});
 
-	const lastEvent = await prisma.webhookEvent.findFirst({
-		where: { shopId: shopConfig.id },
-		orderBy: { createdAt: "desc" },
-	});
+		const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+		eventsLast24h = await prisma.webhookEvent.count({
+			where: {
+				shopId: shopConfig.id,
+				createdAt: { gte: last24Hours },
+			},
+		});
+
+		lastEvent = await prisma.webhookEvent.findFirst({
+			where: { shopId: shopConfig.id },
+			orderBy: { createdAt: "desc" },
+		});
+
+		// Get recent events (last 50)
+		recentEvents = await prisma.webhookEvent.findMany({
+			where: { shopId: shopConfig.id },
+			orderBy: { createdAt: "desc" },
+			take: 50,
+		});
+	} catch (error) {
+		// Table doesn't exist yet (migration not run) - return empty stats
+		console.warn(
+			"WebhookEvent table not found, migration may not have been run:",
+			error
+		);
+	}
 
 	const successRate =
 		totalEvents > 0 ? Math.round((successCount / totalEvents) * 100) : null;
-
-	// Get recent events (last 50)
-	const recentEvents = await prisma.webhookEvent.findMany({
-		where: { shopId: shopConfig.id },
-		orderBy: { createdAt: "desc" },
-		take: 50,
-	});
 
 	return {
 		shop,

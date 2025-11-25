@@ -39,6 +39,7 @@ model Shop {
 
   syncedAssets      SyncedAsset[]
   webhookSubscriptions WebhookSubscription[]
+  webhookEvents     WebhookEvent[]
   syncJobs          SyncJob[]
 }
 
@@ -81,11 +82,32 @@ model SyncJob {
   startedAt   DateTime?
   completedAt DateTime?
   error       String?
+  errors      String?  // JSON array of { assetId, error } objects
   assetsProcessed Int   @default(0)
+  assetsCreated   Int   @default(0)
+  assetsUpdated   Int   @default(0)
   createdAt   DateTime @default(now())
 
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, status])
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  shopId      String
+  eventType   String
+  assetId     String?
+  status      String   // "success" or "failed"
+  payload     String   // JSON string of full webhook payload
+  error       String?
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([status])
+  @@index([createdAt])
 }
 

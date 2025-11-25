@@ -44,17 +44,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			const eventType = body.eventType || body.type || "unknown";
 			const assetId = body.assetId || body.asset?.id || null;
 
-			await prisma.webhookEvent.create({
-				data: {
-					shopId: shopConfig.id,
-					eventType,
-					assetId,
-					status: "failed",
-					payload: JSON.stringify(body),
-					error: "Webhook subscription is not active",
-					processedAt: new Date(),
-				},
-			});
+			// Try to log event, but don't fail if table doesn't exist yet
+			try {
+				await prisma.webhookEvent.create({
+					data: {
+						shopId: shopConfig.id,
+						eventType,
+						assetId,
+						status: "failed",
+						payload: JSON.stringify(body),
+						error: "Webhook subscription is not active",
+						processedAt: new Date(),
+					},
+				});
+			} catch (error) {
+				console.warn(
+					"Failed to log webhook event (table may not exist yet):",
+					error
+				);
+			}
 
 			// Return 200 to prevent Bynder from retrying
 			return Response.json({
@@ -70,28 +78,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const eventType = body.eventType || body.type || "unknown";
 		const assetId = body.assetId || body.asset?.id || null;
 
-		// Log webhook event BEFORE processing
-		const webhookEvent = await prisma.webhookEvent.create({
-			data: {
-				shopId: shopConfig.id,
-				eventType,
-				assetId,
-				status: "success", // Will update if processing fails
-				payload: JSON.stringify(body),
-			},
-		});
-		webhookEventId = webhookEvent.id;
-
-		if (!assetId) {
-			// Update event with error
-			await prisma.webhookEvent.update({
-				where: { id: webhookEventId },
+		// Log webhook event BEFORE processing (handle case where table doesn't exist)
+		try {
+			const webhookEvent = await prisma.webhookEvent.create({
 				data: {
-					status: "failed",
-					error: "Missing asset ID",
-					processedAt: new Date(),
+					shopId: shopConfig.id,
+					eventType,
+					assetId,
+					status: "success", // Will update if processing fails
+					payload: JSON.stringify(body),
 				},
 			});
+			webhookEventId = webhookEvent.id;
+		} catch (error) {
+			console.warn(
+				"Failed to create webhook event (table may not exist yet):",
+				error
+			);
+			// Continue processing even if logging fails
+		}
+
+		if (!assetId) {
+			// Update event with error (if event was created)
+			if (webhookEventId) {
+				try {
+					await prisma.webhookEvent.update({
+						where: { id: webhookEventId },
+						data: {
+							status: "failed",
+							error: "Missing asset ID",
+							processedAt: new Date(),
+						},
+					});
+				} catch (error) {
+					console.warn("Failed to update webhook event:", error);
+				}
+			}
 			return Response.json({ error: "Missing asset ID" }, { status: 400 });
 		}
 
@@ -129,16 +151,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 				assetId,
 			});
 
-			// Update event with processing result
+			// Update event with processing result (if event was created)
 			if (webhookEventId) {
-				await prisma.webhookEvent.update({
-					where: { id: webhookEventId },
-					data: {
-						status: syncResult.error ? "failed" : "success",
-						error: syncResult.error || null,
-						processedAt: new Date(),
-					},
-				});
+				try {
+					await prisma.webhookEvent.update({
+						where: { id: webhookEventId },
+						data: {
+							status: syncResult.error ? "failed" : "success",
+							error: syncResult.error || null,
+							processedAt: new Date(),
+						},
+					});
+				} catch (error) {
+					console.warn("Failed to update webhook event:", error);
+				}
 			}
 
 			if (syncResult.error) {
@@ -161,16 +187,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			});
 		}
 
-		// Event type not relevant, mark as processed
+		// Event type not relevant, mark as processed (if event was created)
 		if (webhookEventId) {
-			await prisma.webhookEvent.update({
-				where: { id: webhookEventId },
-				data: {
-					status: "success",
-					error: "Event type not relevant for sync",
-					processedAt: new Date(),
-				},
-			});
+			try {
+				await prisma.webhookEvent.update({
+					where: { id: webhookEventId },
+					data: {
+						status: "success",
+						error: "Event type not relevant for sync",
+						processedAt: new Date(),
+					},
+				});
+			} catch (error) {
+				console.warn("Failed to update webhook event:", error);
+			}
 		}
 
 		return Response.json({ success: true, skipped: true });

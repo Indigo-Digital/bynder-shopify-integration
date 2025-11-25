@@ -311,6 +311,8 @@ export async function uploadBynderAsset(
 
 	// Helper function to create FormData and upload body for each retry attempt
 	// This is necessary because streams/buffers can only be consumed once
+	// CRITICAL: For signed URLs (GCS/S3), we must send FormData as-is without converting to buffer
+	// Converting to buffer breaks the signature because it changes the multipart boundary/encoding
 	const createUploadBody = async (): Promise<{
 		body: BodyInit;
 		headers: HeadersInit;
@@ -362,82 +364,20 @@ export async function uploadBynderAsset(
 		if (retryIsPolyfill) {
 			const polyfillFormData = retryFormData as unknown as {
 				getHeaders?: () => HeadersInit;
-				getBuffer?: () => Promise<Buffer> | Buffer;
 			} & NodeJS.ReadableStream;
 
-			// Get headers if available
+			// Get headers if available (for Content-Type with boundary)
 			if (typeof polyfillFormData.getHeaders === "function") {
 				retryUploadHeaders = polyfillFormData.getHeaders();
 			}
 
-			// Try to use getBuffer() if available (most reliable method)
-			if (typeof polyfillFormData.getBuffer === "function") {
-				try {
-					const formDataBuffer = polyfillFormData.getBuffer();
-					// Handle both sync and async getBuffer
-					const buffer =
-						formDataBuffer instanceof Promise
-							? await formDataBuffer
-							: formDataBuffer;
-					// Convert Buffer to Uint8Array for BodyInit
-					retryUploadBody = new Uint8Array(buffer);
-					needsDuplex = false;
-				} catch (error) {
-					// If getBuffer fails, fall back to stream collection
-					console.warn(
-						`[Upload] getBuffer() failed, using stream collection: ${error instanceof Error ? error.message : String(error)}`
-					);
-					// Fall through to stream collection
-				}
-			}
-
-			// If getBuffer didn't work or isn't available, collect stream into buffer
-			if (!retryUploadBody) {
-				const nodeStream = polyfillFormData as NodeJS.ReadableStream;
-				const chunks: Buffer[] = [];
-				let streamError: Error | null = null;
-
-				// Pause stream first to ensure we can set up handlers
-				if (
-					typeof (nodeStream as { pause?: () => void }).pause === "function"
-				) {
-					(nodeStream as { pause: () => void }).pause();
-				}
-
-				// Collect all stream data into chunks
-				await new Promise<void>((resolve, reject) => {
-					nodeStream.on("data", (chunk: Buffer) => {
-						chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-					});
-
-					nodeStream.on("end", () => {
-						if (streamError) {
-							reject(streamError);
-							return;
-						}
-						resolve();
-					});
-
-					nodeStream.on("error", (err: Error) => {
-						streamError = err;
-						reject(err);
-					});
-
-					// Resume the stream to start collecting data
-					if (
-						typeof (nodeStream as { resume?: () => void }).resume === "function"
-					) {
-						(nodeStream as { resume: () => void }).resume();
-					}
-				});
-
-				// Combine all chunks into a single buffer
-				const formDataBuffer = Buffer.concat(chunks);
-
-				// Convert Buffer to Uint8Array for BodyInit
-				retryUploadBody = new Uint8Array(formDataBuffer);
-				needsDuplex = false;
-			}
+			// CRITICAL: Use the FormData stream directly, DO NOT convert to buffer
+			// Converting to buffer breaks the signature for signed URLs because:
+			// 1. The boundary in the Content-Type header must match the actual multipart data
+			// 2. The signature is calculated based on the exact request format
+			// 3. Any modification (including buffer conversion) invalidates the signature
+			retryUploadBody = polyfillFormData as unknown as BodyInit;
+			needsDuplex = true; // Required for streaming uploads
 		} else {
 			// Native FormData - use directly
 			retryUploadBody = retryFormData;

@@ -14,6 +14,64 @@ console.log("[Worker] Imports loaded successfully");
 const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
 
 /**
+ * Helper function to execute a Prisma query with automatic reconnection on connection errors
+ */
+async function withPrismaRetry<T>(
+	operation: () => Promise<T>,
+	maxRetries = 3
+): Promise<T> {
+	let lastError: Error | null = null;
+	for (let attempt = 1; attempt <= maxRetries; attempt++) {
+		try {
+			return await operation();
+		} catch (error) {
+			lastError = error instanceof Error ? error : new Error(String(error));
+
+			// Check if it's a connection error (P1017 or similar)
+			// Prisma error codes: P1017 = Server has closed the connection
+			const isConnectionError =
+				(error &&
+					typeof error === "object" &&
+					"code" in error &&
+					error.code === "P1017") ||
+				(error instanceof Error &&
+					(error.message.includes("Server has closed the connection") ||
+						error.message.includes("P1017") ||
+						error.message.includes("connection closed") ||
+						error.message.includes("Connection closed")));
+
+			if (isConnectionError && attempt < maxRetries) {
+				console.warn(
+					`[Worker] Database connection error (attempt ${attempt}/${maxRetries}): ${lastError.message}. Reconnecting...`
+				);
+				try {
+					// Disconnect and reconnect
+					await prisma.$disconnect().catch(() => {
+						// Ignore disconnect errors
+					});
+					await prisma.$connect();
+					console.log("[Worker] Database reconnected successfully");
+					// Wait a bit before retrying
+					await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+					continue;
+				} catch (reconnectError) {
+					console.error(
+						`[Worker] Failed to reconnect to database: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`
+					);
+					// Continue to next retry attempt
+					await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+					continue;
+				}
+			}
+
+			// If not a connection error or out of retries, throw
+			throw lastError;
+		}
+	}
+	throw lastError || new Error("Unknown error in withPrismaRetry");
+}
+
+/**
  * Worker process that polls for pending sync jobs and processes them
  */
 async function processJobs() {
@@ -25,29 +83,31 @@ async function processJobs() {
 			// - Running jobs without startedAt (shouldn't happen, but handle it)
 			// - Running jobs that started more than 5 minutes ago
 			const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-			const pendingJob = await prisma.syncJob.findFirst({
-				where: {
-					OR: [
-						{ status: "pending" },
-						{
-							status: "running",
-							startedAt: null, // Running but never had startedAt set (stuck)
-						},
-						{
-							status: "running",
-							startedAt: {
-								lt: fiveMinutesAgo, // Started more than 5 minutes ago (stuck)
+			const pendingJob = await withPrismaRetry(() =>
+				prisma.syncJob.findFirst({
+					where: {
+						OR: [
+							{ status: "pending" },
+							{
+								status: "running",
+								startedAt: null, // Running but never had startedAt set (stuck)
 							},
-						},
-					],
-				},
-				orderBy: {
-					createdAt: "asc",
-				},
-				include: {
-					shop: true,
-				},
-			});
+							{
+								status: "running",
+								startedAt: {
+									lt: fiveMinutesAgo, // Started more than 5 minutes ago (stuck)
+								},
+							},
+						],
+					},
+					orderBy: {
+						createdAt: "asc",
+					},
+					include: {
+						shop: true,
+					},
+				})
+			);
 
 			if (!pendingJob) {
 				// No pending jobs, wait and check again
@@ -65,13 +125,15 @@ async function processJobs() {
 
 			// Mark job as running (if it wasn't already)
 			if (pendingJob.status !== "running") {
-				await prisma.syncJob.update({
-					where: { id: pendingJob.id },
-					data: {
-						status: "running",
-						startedAt: new Date(),
-					},
-				});
+				await withPrismaRetry(() =>
+					prisma.syncJob.update({
+						where: { id: pendingJob.id },
+						data: {
+							status: "running",
+							startedAt: new Date(),
+						},
+					})
+				);
 			} else {
 				console.log(
 					`[Worker] Job ${pendingJob.id} was already running, resuming...`
@@ -118,13 +180,20 @@ async function processJobs() {
 				console.error(`[Worker] Job ${pendingJob.id} failed:`, errorMessage);
 
 				// Mark job as failed
-				await prisma.syncJob.update({
-					where: { id: pendingJob.id },
-					data: {
-						status: "failed",
-						completedAt: new Date(),
-						error: errorMessage,
-					},
+				await withPrismaRetry(() =>
+					prisma.syncJob.update({
+						where: { id: pendingJob.id },
+						data: {
+							status: "failed",
+							completedAt: new Date(),
+							error: errorMessage,
+						},
+					})
+				).catch((updateError) => {
+					// Log but don't throw - we've already logged the original error
+					console.error(
+						`[Worker] Failed to update job status to failed: ${updateError instanceof Error ? updateError.message : String(updateError)}`
+					);
 				});
 			}
 		} catch (error) {

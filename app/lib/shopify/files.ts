@@ -1,4 +1,5 @@
 import axios from "axios";
+import FormData from "form-data";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
 import type { AdminApi } from "../types.js";
@@ -322,14 +323,12 @@ export async function uploadBynderAsset(
 	}
 
 	// Helper function to create FormData for upload
-	// Using axios with form-data stream directly (not getBuffer()) to preserve signature
+	// Explicitly use form-data package to ensure getHeaders() and getBuffer() are available
 	const createFormData = (): FormData => {
 		const retryFormData = new FormData();
 
-		// Detect if we're using the form-data polyfill (has _boundary property) vs native FormData
-		const retryIsPolyfill =
-			"_boundary" in retryFormData ||
-			typeof (retryFormData as { _streams?: unknown })._streams !== "undefined";
+		// We're explicitly using form-data package, so it always has getHeaders() and getBuffer()
+		const retryIsPolyfill = true;
 
 		// Log parameters being added (for debugging signature issues)
 		console.log(
@@ -508,21 +507,15 @@ export async function uploadBynderAsset(
 				console.log(
 					`[Upload Debug] FormData type: ${isPolyfill ? "polyfill" : "native"}, has getHeaders: ${typeof (formData as unknown as { getHeaders?: () => HeadersInit }).getHeaders === "function"}`
 				);
-				// Count FormData entries - polyfill doesn't have entries() method
-				let formDataEntryCount = 0;
-				if (typeof formData.entries === "function") {
-					// Native FormData
-					formDataEntryCount = Array.from(formData.entries()).length;
-				} else if (isPolyfill) {
-					// form-data polyfill - count manually
-					const polyfillFormData = formData as unknown as {
-						_streams?: unknown[];
-						_length?: number;
-					};
-					// The polyfill stores entries in _streams array (rough count)
-					formDataEntryCount =
-						polyfillFormData._streams?.length || polyfillFormData._length || 0;
-				}
+				// Count FormData entries - form-data package doesn't have entries() method
+				// We're always using form-data package now, so count manually
+				const polyfillFormData = formData as unknown as {
+					_streams?: unknown[];
+					_length?: number;
+				};
+				// The polyfill stores entries in _streams array (rough count)
+				const formDataEntryCount =
+					polyfillFormData._streams?.length || polyfillFormData._length || 0;
 				console.log(
 					`[Upload Debug] Number of FormData entries: ${formDataEntryCount}`
 				);

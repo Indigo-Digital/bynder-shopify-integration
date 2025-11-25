@@ -38,6 +38,9 @@ importers:
       axios:
         specifier: ^1.13.2
         version: 1.13.2
+      form-data:
+        specifier: ^4.0.5
+        version: 4.0.5
       isbot:
         specifier: ^5.1.31
         version: 5.1.32

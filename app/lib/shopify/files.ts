@@ -364,20 +364,42 @@ export async function uploadBynderAsset(
 		if (retryIsPolyfill) {
 			const polyfillFormData = retryFormData as unknown as {
 				getHeaders?: () => HeadersInit;
+				getBuffer?: () => Promise<Buffer> | Buffer;
 			} & NodeJS.ReadableStream;
 
-			// Get headers if available (for Content-Type with boundary)
+			// Get headers first (for Content-Type with boundary)
 			if (typeof polyfillFormData.getHeaders === "function") {
 				retryUploadHeaders = polyfillFormData.getHeaders();
 			}
 
-			// CRITICAL: Use the FormData stream directly, DO NOT convert to buffer
-			// Converting to buffer breaks the signature for signed URLs because:
-			// 1. The boundary in the Content-Type header must match the actual multipart data
-			// 2. The signature is calculated based on the exact request format
-			// 3. Any modification (including buffer conversion) invalidates the signature
-			retryUploadBody = polyfillFormData as unknown as BodyInit;
-			needsDuplex = true; // Required for streaming uploads
+			// CRITICAL: Serialize FormData to buffer using getBuffer()
+			// This preserves the exact multipart format including boundaries
+			// The signature will still work because:
+			// 1. getBuffer() produces the exact serialized form data
+			// 2. getHeaders() provides the Content-Type header with matching boundary
+			// 3. The boundary in header matches the boundary in the serialized data
+			// 4. The signature is calculated on the exact request format, which we preserve
+			if (typeof polyfillFormData.getBuffer === "function") {
+				try {
+					const formDataBufferResult = polyfillFormData.getBuffer();
+					// Handle both sync and async getBuffer
+					const serializedFormData =
+						formDataBufferResult instanceof Promise
+							? await formDataBufferResult
+							: formDataBufferResult;
+					// Convert Buffer to Uint8Array for BodyInit
+					retryUploadBody = new Uint8Array(serializedFormData);
+					needsDuplex = false;
+				} catch (error) {
+					throw new Error(
+						`Failed to serialize FormData: ${error instanceof Error ? error.message : String(error)}`
+					);
+				}
+			} else {
+				// Fallback: use stream directly (may not work in all environments)
+				retryUploadBody = polyfillFormData as unknown as BodyInit;
+				needsDuplex = true;
+			}
 		} else {
 			// Native FormData - use directly
 			retryUploadBody = retryFormData;

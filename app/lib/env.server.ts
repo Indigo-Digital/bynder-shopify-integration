@@ -19,6 +19,8 @@ interface EnvConfig {
 	BYNDER_CLIENT_SECRET?: string | undefined;
 	SCOPES?: string | undefined;
 	SHOP_CUSTOM_DOMAIN?: string | undefined;
+	BYNDER_WEBHOOK_SECRET?: string | undefined;
+	BYNDER_WEBHOOK_VERIFY_SIGNATURES?: string | undefined;
 }
 
 /**
@@ -63,6 +65,9 @@ export function validateEnv(): EnvConfig {
 		BYNDER_CLIENT_SECRET: process.env.BYNDER_CLIENT_SECRET ?? undefined,
 		SCOPES: process.env.SCOPES ?? undefined,
 		SHOP_CUSTOM_DOMAIN: process.env.SHOP_CUSTOM_DOMAIN ?? undefined,
+		BYNDER_WEBHOOK_SECRET: process.env.BYNDER_WEBHOOK_SECRET ?? undefined,
+		BYNDER_WEBHOOK_VERIFY_SIGNATURES:
+			process.env.BYNDER_WEBHOOK_VERIFY_SIGNATURES ?? undefined,
 	};
 }
 

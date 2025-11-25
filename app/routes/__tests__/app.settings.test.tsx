@@ -52,6 +52,7 @@ describe("app.settings loader", () => {
 		shop: "test-shop.myshopify.com",
 		bynderBaseUrl: "https://test.bynder.com/api",
 		syncTags: "shopify-sync,campaign",
+		webhookSubscriptions: [],
 	};
 
 	beforeEach(() => {

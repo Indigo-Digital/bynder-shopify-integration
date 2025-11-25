@@ -1,6 +1,11 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
+import {
+	extractWebhookSignature,
+	verifyWebhookSignature,
+} from "../lib/bynder/webhooks.js";
+import { env } from "../lib/env.server.js";
 import { syncSingleBynderAsset } from "../lib/sync/single-asset-sync.js";
 import { authenticate } from "../shopify.server.js";
 
@@ -16,7 +21,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 	let webhookEventId: string | null = null;
 
 	try {
-		const body = await request.json();
+		// Get raw body for signature verification
+		const rawBody = await request.text();
+		let body: {
+			eventType?: string;
+			type?: string;
+			assetId?: string;
+			asset?: { id?: string };
+		};
+		try {
+			body = JSON.parse(rawBody) as {
+				eventType?: string;
+				type?: string;
+				assetId?: string;
+				asset?: { id?: string };
+			};
+		} catch {
+			return Response.json({ error: "Invalid JSON payload" }, { status: 400 });
+		}
+
 		const { session } = await authenticate.admin(request);
 		const shop = session.shop;
 
@@ -52,7 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 						eventType,
 						assetId,
 						status: "failed",
-						payload: JSON.stringify(body),
+						payload: rawBody,
 						error: "Webhook subscription is not active",
 						processedAt: new Date(),
 					},
@@ -71,8 +94,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			});
 		}
 
-		// Verify webhook signature if Bynder provides it
-		// TODO: Implement webhook signature verification when available
+		// Verify webhook signature if enabled and secret is configured
+		const verifySignatures =
+			env.BYNDER_WEBHOOK_VERIFY_SIGNATURES === "true" ||
+			env.BYNDER_WEBHOOK_VERIFY_SIGNATURES === "1";
+		const webhookSecret = env.BYNDER_WEBHOOK_SECRET;
+
+		if (verifySignatures && webhookSecret) {
+			const signature = extractWebhookSignature(request.headers);
+			if (!signature) {
+				console.warn(
+					"[Webhook] Signature verification enabled but no signature header found"
+				);
+				// Log but don't reject - Bynder may not support signatures yet
+			} else {
+				const isValid = verifyWebhookSignature(
+					rawBody,
+					signature,
+					webhookSecret
+				);
+				if (!isValid) {
+					console.error("[Webhook] Invalid signature - rejecting webhook");
+					return Response.json(
+						{ error: "Invalid webhook signature" },
+						{ status: 401 }
+					);
+				}
+				console.log("[Webhook] Signature verified successfully");
+			}
+		} else if (verifySignatures && !webhookSecret) {
+			console.warn(
+				"[Webhook] Signature verification enabled but BYNDER_WEBHOOK_SECRET not configured"
+			);
+		}
 
 		// Parse webhook event
 		const eventType = body.eventType || body.type || "unknown";
@@ -86,7 +140,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 					eventType,
 					assetId,
 					status: "success", // Will update if processing fails
-					payload: JSON.stringify(body),
+					payload: rawBody,
 				},
 			});
 			webhookEventId = webhookEvent.id;

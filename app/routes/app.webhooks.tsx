@@ -7,6 +7,7 @@ import { BynderClient } from "../lib/bynder/client.js";
 import {
 	createWebhookSubscription,
 	deleteWebhookSubscription,
+	updateWebhookSubscription,
 } from "../lib/bynder/webhooks.js";
 import { env } from "../lib/env.server.js";
 import { authenticate } from "../shopify.server.js";
@@ -54,11 +55,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		processedAt: Date | null;
 		createdAt: Date;
 	}> = [];
+	let pagination = {
+		page: 1,
+		pageSize: 20,
+		total: 0,
+		totalPages: 0,
+	};
+	let lastSuccessfulEvent: { createdAt: Date } | null = null;
 
 	try {
-		totalEvents = await prisma.webhookEvent.count({
+		// Get pagination info
+		const url = new URL(request.url);
+		const page = parseInt(url.searchParams.get("page") || "1", 10);
+		const pageSize = 20;
+		const skip = (page - 1) * pageSize;
+
+		const totalEventsCount = await prisma.webhookEvent.count({
 			where: { shopId: shopConfig.id },
 		});
+
+		totalEvents = totalEventsCount;
 
 		successCount = await prisma.webhookEvent.count({
 			where: {
@@ -87,12 +103,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 			orderBy: { createdAt: "desc" },
 		});
 
-		// Get recent events (last 50)
+		// Get last successful event for health check
+		lastSuccessfulEvent = await prisma.webhookEvent.findFirst({
+			where: {
+				shopId: shopConfig.id,
+				status: "success",
+			},
+			orderBy: { createdAt: "desc" },
+		});
+
+		// Get recent events with pagination
 		recentEvents = await prisma.webhookEvent.findMany({
 			where: { shopId: shopConfig.id },
 			orderBy: { createdAt: "desc" },
-			take: 50,
+			take: pageSize,
+			skip,
 		});
+
+		pagination = {
+			page,
+			pageSize,
+			total: totalEventsCount,
+			totalPages: Math.ceil(totalEventsCount / pageSize),
+		};
 	} catch (error) {
 		// Table doesn't exist yet (migration not run) - return empty stats
 		console.warn(
@@ -115,8 +148,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 			eventsLast24h,
 			successRate,
 			lastEventTime: lastEvent?.createdAt || null,
+			lastSuccessfulEventTime: lastSuccessfulEvent?.createdAt || null,
 		},
 		recentEvents,
+		webhookUrl: `${env.SHOPIFY_APP_URL}/api/bynder/webhooks`,
+		pagination,
 	};
 };
 
@@ -151,13 +187,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			// Construct webhook URL
 			const webhookUrl = `${env.SHOPIFY_APP_URL}/api/bynder/webhooks`;
 
+			// Get event types from form (default to asset.tagged, media.tagged)
+			const eventTypesInput = formData.get("eventTypes")?.toString() || "";
+			const eventTypes =
+				eventTypesInput.length > 0
+					? eventTypesInput.split(",").map((e) => e.trim())
+					: ["asset.tagged", "media.tagged"];
+
 			if (isActivating) {
-				// Create webhook subscription in Bynder
-				const bynderWebhook = await createWebhookSubscription(
-					bynderClient,
-					webhookUrl,
-					["asset.tagged", "media.tagged"]
-				);
+				// Create or update webhook subscription in Bynder
+				let bynderWebhook: {
+					id: string;
+					url: string;
+					events: string[];
+					active: boolean;
+				};
+				if (existingSubscription?.bynderWebhookId) {
+					// Update existing webhook in Bynder
+					bynderWebhook = await updateWebhookSubscription(
+						bynderClient,
+						existingSubscription.bynderWebhookId,
+						webhookUrl,
+						eventTypes
+					);
+				} else {
+					// Create new webhook subscription in Bynder
+					bynderWebhook = await createWebhookSubscription(
+						bynderClient,
+						webhookUrl,
+						eventTypes
+					);
+				}
 
 				// Store in database
 				if (existingSubscription) {
@@ -168,6 +228,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 							bynderWebhookId: bynderWebhook.id,
 							active: true,
 							endpoint: webhookUrl,
+							eventType: eventTypes.join(","),
 						},
 					});
 				} else {
@@ -176,7 +237,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 						data: {
 							shopId: shopConfig.id,
 							bynderWebhookId: bynderWebhook.id,
-							eventType: "asset.tagged,media.tagged",
+							eventType: eventTypes.join(","),
 							endpoint: webhookUrl,
 							active: true,
 						},
@@ -218,15 +279,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function WebhooksPage() {
-	const { shopConfig, webhookSubscription, stats, recentEvents } =
-		useLoaderData<typeof loader>();
+	const {
+		shopConfig,
+		webhookSubscription,
+		stats,
+		recentEvents,
+		webhookUrl,
+		pagination,
+	} = useLoaderData<typeof loader>();
 	const fetcher = useFetcher();
+	const testFetcher = useFetcher();
 	const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
 	const [statusFilter, setStatusFilter] = useState<
 		"all" | "success" | "failed"
 	>("all");
+	const [assetIdFilter, setAssetIdFilter] = useState("");
+	const [copied, setCopied] = useState(false);
+	const [selectedEvents, setSelectedEvents] = useState<string[]>([
+		"asset.tagged",
+		"media.tagged",
+	]);
 
 	const isSubmitting = fetcher.state !== "idle";
+	const isTesting = testFetcher.state !== "idle";
 
 	const toggleExpand = (eventId: string) => {
 		const newExpanded = new Set(expandedEvents);
@@ -238,13 +313,42 @@ export default function WebhooksPage() {
 		setExpandedEvents(newExpanded);
 	};
 
-	const filteredEvents =
-		statusFilter === "all"
-			? recentEvents
-			: recentEvents.filter(
-					(event: (typeof recentEvents)[number]) =>
-						event.status === statusFilter
-				);
+	const filteredEvents = recentEvents.filter(
+		(event: (typeof recentEvents)[number]) => {
+			const statusMatch =
+				statusFilter === "all" || event.status === statusFilter;
+			const assetIdMatch =
+				!assetIdFilter ||
+				event.assetId?.toLowerCase().includes(assetIdFilter.toLowerCase());
+			return statusMatch && assetIdMatch;
+		}
+	);
+
+	const handleCopyUrl = async () => {
+		if (!webhookUrl) return;
+		try {
+			await navigator.clipboard.writeText(webhookUrl);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		} catch (error) {
+			console.error("Failed to copy URL:", error);
+		}
+	};
+
+	const handleTestWebhook = () => {
+		testFetcher.submit(
+			{},
+			{ method: "POST", action: "/api/bynder/webhooks/test-endpoint" }
+		);
+	};
+
+	const toggleEventType = (eventType: string) => {
+		if (selectedEvents.includes(eventType)) {
+			setSelectedEvents(selectedEvents.filter((e) => e !== eventType));
+		} else {
+			setSelectedEvents([...selectedEvents, eventType]);
+		}
+	};
 
 	if (!shopConfig || !shopConfig.bynderBaseUrl) {
 		return (
@@ -285,21 +389,114 @@ export default function WebhooksPage() {
 						match your sync criteria (defined in Settings) and automatically
 						processes them into Shopify using the background job.
 					</s-paragraph>
+
+					{/* Status Display */}
 					<s-stack direction="inline" gap="base" alignItems="center">
 						<s-text>
 							<strong>Status:</strong>{" "}
-							{isActive ? (
-								<span style={{ color: "#155724" }}>Active</span>
-							) : (
-								<span style={{ color: "#721c24" }}>Inactive</span>
-							)}
+							<span
+								style={{
+									padding: "0.25rem 0.5rem",
+									borderRadius: "4px",
+									fontSize: "0.875rem",
+									fontWeight: "600",
+									backgroundColor: isActive ? "#d4edda" : "#f8d7da",
+									color: isActive ? "#155724" : "#721c24",
+								}}
+							>
+								{isActive ? "✓ Active" : "✗ Inactive"}
+							</span>
 						</s-text>
+						{stats?.lastSuccessfulEventTime && (
+							<div style={{ fontSize: "0.875rem", color: "#666" }}>
+								<s-text>
+									Last successful event:{" "}
+									{new Date(stats.lastSuccessfulEventTime).toLocaleString()}
+								</s-text>
+							</div>
+						)}
+					</s-stack>
+
+					{/* Webhook Endpoint URL with Copy */}
+					<s-stack direction="block" gap="base">
+						<s-text>
+							<strong>Webhook Endpoint URL:</strong>
+						</s-text>
+						<s-stack direction="inline" gap="base" alignItems="center">
+							<div
+								style={{
+									flex: 1,
+									fontFamily: "monospace",
+									fontSize: "0.875rem",
+									wordBreak: "break-all",
+									padding: "0.75rem",
+									border: "1px solid #ddd",
+									borderRadius: "4px",
+								}}
+							>
+								{webhookUrl}
+							</div>
+							<s-button
+								variant="secondary"
+								onClick={handleCopyUrl}
+								disabled={copied || !webhookUrl}
+							>
+								{copied ? "Copied!" : "Copy URL"}
+							</s-button>
+						</s-stack>
+					</s-stack>
+
+					{/* Event Type Selection */}
+					{!isActive && (
+						<fetcher.Form method="POST">
+							<input type="hidden" name="intent" value="toggle_webhook" />
+							<input type="hidden" name="active" value="true" />
+							<input
+								type="hidden"
+								name="eventTypes"
+								value={selectedEvents.join(",")}
+							/>
+							<s-stack direction="block" gap="base">
+								<s-text>
+									<strong>Event Types to Subscribe To:</strong>
+								</s-text>
+								<s-stack direction="inline" gap="base">
+									{["asset.tagged", "media.tagged"].map((eventType) => (
+										<label
+											key={eventType}
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "0.5rem",
+												cursor: "pointer",
+											}}
+										>
+											<input
+												type="checkbox"
+												checked={selectedEvents.includes(eventType)}
+												onChange={() => toggleEventType(eventType)}
+											/>
+											<s-text>{eventType}</s-text>
+										</label>
+									))}
+								</s-stack>
+							</s-stack>
+						</fetcher.Form>
+					)}
+
+					{/* Action Buttons */}
+					<s-stack direction="inline" gap="base">
 						<fetcher.Form method="POST">
 							<input type="hidden" name="intent" value="toggle_webhook" />
 							<input
 								type="hidden"
 								name="active"
 								value={(!isActive).toString()}
+							/>
+							<input
+								type="hidden"
+								name="eventTypes"
+								value={selectedEvents.join(",")}
 							/>
 							<s-button
 								type="submit"
@@ -313,22 +510,58 @@ export default function WebhooksPage() {
 										: "Activate"}
 							</s-button>
 						</fetcher.Form>
+						{isActive && (
+							<s-button
+								variant="secondary"
+								onClick={handleTestWebhook}
+								disabled={isTesting}
+							>
+								{isTesting ? "Testing..." : "Test Webhook"}
+							</s-button>
+						)}
 					</s-stack>
+
+					{/* Test Results */}
+					{testFetcher.data &&
+						(testFetcher.data.success ? (
+							<s-banner tone="success">
+								{testFetcher.data.message ||
+									"Webhook test completed successfully!"}
+							</s-banner>
+						) : (
+							<s-banner tone="critical">
+								Test failed:{" "}
+								{typeof testFetcher.data.error === "string"
+									? testFetcher.data.error
+									: "Unknown error"}
+							</s-banner>
+						))}
+
+					{/* Subscription Details */}
 					{webhookSubscription && (
-						<s-paragraph>
-							<s-text>
-								<strong>Endpoint:</strong> {webhookSubscription.endpoint}
-							</s-text>
-							<br />
-							<s-text>
-								<strong>Events:</strong> {webhookSubscription.eventType}
-							</s-text>
-							<br />
-							<s-text>
-								<strong>Bynder Webhook ID:</strong>{" "}
-								{webhookSubscription.bynderWebhookId}
-							</s-text>
-						</s-paragraph>
+						<s-box
+							padding="base"
+							borderWidth="base"
+							borderRadius="base"
+							background="subdued"
+						>
+							<s-stack direction="block" gap="base">
+								<s-text>
+									<strong>Subscription Details:</strong>
+								</s-text>
+								<s-text>
+									<strong>Events:</strong> {webhookSubscription.eventType}
+								</s-text>
+								<s-text>
+									<strong>Bynder Webhook ID:</strong>{" "}
+									{webhookSubscription.bynderWebhookId}
+								</s-text>
+								<s-text>
+									<strong>Created:</strong>{" "}
+									{new Date(webhookSubscription.createdAt).toLocaleString()}
+								</s-text>
+							</s-stack>
+						</s-box>
 					)}
 				</s-stack>
 			</s-section>
@@ -366,26 +599,39 @@ export default function WebhooksPage() {
 			{/* Recent Events Section */}
 			<s-section heading="Recent Events">
 				<s-stack direction="block" gap="base">
-					{/* Filter */}
-					<s-stack direction="inline" gap="base">
-						<s-button
-							variant={statusFilter === "all" ? "primary" : "secondary"}
-							onClick={() => setStatusFilter("all")}
-						>
-							All ({recentEvents.length})
-						</s-button>
-						<s-button
-							variant={statusFilter === "success" ? "primary" : "secondary"}
-							onClick={() => setStatusFilter("success")}
-						>
-							Success ({stats?.successCount || 0})
-						</s-button>
-						<s-button
-							variant={statusFilter === "failed" ? "primary" : "secondary"}
-							onClick={() => setStatusFilter("failed")}
-						>
-							Failed ({stats?.failureCount || 0})
-						</s-button>
+					{/* Filters */}
+					<s-stack direction="block" gap="base">
+						<s-stack direction="inline" gap="base">
+							<s-button
+								variant={statusFilter === "all" ? "primary" : "secondary"}
+								onClick={() => setStatusFilter("all")}
+							>
+								All ({recentEvents.length})
+							</s-button>
+							<s-button
+								variant={statusFilter === "success" ? "primary" : "secondary"}
+								onClick={() => setStatusFilter("success")}
+							>
+								Success ({stats?.successCount || 0})
+							</s-button>
+							<s-button
+								variant={statusFilter === "failed" ? "primary" : "secondary"}
+								onClick={() => setStatusFilter("failed")}
+							>
+								Failed ({stats?.failureCount || 0})
+							</s-button>
+						</s-stack>
+						<s-text-field
+							label="Filter by Asset ID"
+							value={assetIdFilter}
+							onChange={(e) => {
+								const target = e.currentTarget;
+								if (target) {
+									setAssetIdFilter(target.value);
+								}
+							}}
+							placeholder="Enter asset ID to filter..."
+						/>
 					</s-stack>
 
 					{/* Events Table */}
@@ -592,6 +838,34 @@ export default function WebhooksPage() {
 								</tbody>
 							</table>
 						</div>
+					)}
+
+					{/* Pagination */}
+					{pagination && pagination.totalPages > 1 && (
+						<s-stack direction="inline" gap="base" alignItems="center">
+							<s-text>
+								Page {pagination.page} of {pagination.totalPages} (
+								{pagination.total} total events)
+							</s-text>
+							<s-stack direction="inline" gap="base">
+								{pagination.page > 1 && (
+									<s-button
+										variant="secondary"
+										href={`/app/webhooks?page=${pagination.page - 1}`}
+									>
+										Previous
+									</s-button>
+								)}
+								{pagination.page < pagination.totalPages && (
+									<s-button
+										variant="secondary"
+										href={`/app/webhooks?page=${pagination.page + 1}`}
+									>
+										Next
+									</s-button>
+								)}
+							</s-stack>
+						</s-stack>
 					)}
 				</s-stack>
 			</s-section>

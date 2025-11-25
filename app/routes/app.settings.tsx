@@ -12,6 +12,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 	const shopConfig = await prisma.shop.findUnique({
 		where: { shop },
+		include: {
+			webhookSubscriptions: {
+				where: { active: true },
+				take: 1,
+			},
+		},
 	});
 
 	if (!shopConfig) {
@@ -65,6 +71,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		take: 5,
 	});
 
+	// Get webhook subscription status
+	const webhookSubscription =
+		shopConfig?.webhookSubscriptions?.[0] || null;
+
 	return {
 		shop,
 		shopConfig,
@@ -77,6 +87,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 			successRate,
 		},
 		recentFailures,
+		webhookSubscription,
 	};
 };
 
@@ -135,7 +146,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SettingsPage() {
-	const { shopConfig, stats, recentFailures } = useLoaderData<typeof loader>();
+	const { shopConfig, stats, recentFailures, webhookSubscription } =
+		useLoaderData<typeof loader>();
 	const fetcher = useFetcher();
 	const testFetcher = useFetcher();
 
@@ -337,6 +349,36 @@ export default function SettingsPage() {
 								</s-stack>
 							</s-box>
 						))}
+					</s-stack>
+				</s-section>
+			)}
+
+			{/* Webhook Management Section */}
+			{shopConfig?.bynderBaseUrl && (
+				<s-section heading="Webhook Management">
+					<s-stack direction="block" gap="base">
+						<s-paragraph>
+							Manage your Bynder webhook subscriptions for automatic asset
+							synchronization.
+						</s-paragraph>
+						<s-stack direction="inline" gap="base" alignItems="center">
+							<s-text>
+								<strong>Status:</strong>{" "}
+								{webhookSubscription?.active ? (
+									<span style={{ color: "#155724" }}>Active</span>
+								) : (
+									<span style={{ color: "#721c24" }}>Inactive</span>
+								)}
+							</s-text>
+							<s-button variant="secondary" href="/app/webhooks">
+								Manage Webhooks
+							</s-button>
+						</s-stack>
+						{webhookSubscription && (
+							<div style={{ fontSize: "0.875rem", color: "#666" }}>
+								<s-text>Events: {webhookSubscription.eventType}</s-text>
+							</div>
+						)}
 					</s-stack>
 				</s-section>
 			)}

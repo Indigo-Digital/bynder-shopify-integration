@@ -1,3 +1,4 @@
+import axios from "axios";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
 import type { AdminApi } from "../types.js";
@@ -309,21 +310,25 @@ export async function uploadBynderAsset(
 		formData.append("file", fileToUpload);
 	}
 
-	// Helper function to create FormData and upload body for each retry attempt
-	// This is necessary because streams/buffers can only be consumed once
-	// CRITICAL: For signed URLs (GCS/S3), we must send FormData as-is without converting to buffer
-	// Converting to buffer breaks the signature because it changes the multipart boundary/encoding
-	const createUploadBody = async (): Promise<{
-		body: BodyInit;
-		headers: HeadersInit;
-		needsDuplex: boolean;
-	}> => {
+	// Helper function to create FormData for upload
+	// Using axios with form-data stream directly (not getBuffer()) to preserve signature
+	const createFormData = (): FormData => {
 		const retryFormData = new FormData();
 
 		// Detect if we're using the form-data polyfill (has _boundary property) vs native FormData
 		const retryIsPolyfill =
 			"_boundary" in retryFormData ||
 			typeof (retryFormData as { _streams?: unknown })._streams !== "undefined";
+
+		// Log parameters being added (for debugging signature issues)
+		console.log(
+			`[Upload Debug] Adding ${stagedTarget.parameters.length} parameters to FormData`
+		);
+		for (const param of stagedTarget.parameters) {
+			console.log(
+				`[Upload Debug] Parameter: ${param.name} = ${param.value.substring(0, 50)}${param.value.length > 50 ? "..." : ""}`
+			);
+		}
 
 		// Add parameters from staged upload first (S3/GCS requires specific order)
 		for (const param of stagedTarget.parameters) {
@@ -344,6 +349,9 @@ export async function uploadBynderAsset(
 				filename: sanitizedStagedFilename,
 				contentType: contentType,
 			});
+			console.log(
+				`[Upload Debug] Added file to FormData (polyfill): ${sanitizedStagedFilename}, size: ${buffer.length} bytes, contentType: ${contentType}`
+			);
 		} else {
 			// Native FormData (Node.js 20+) supports File objects
 			const fileToUpload = new File(
@@ -354,86 +362,74 @@ export async function uploadBynderAsset(
 				}
 			);
 			retryFormData.append("file", fileToUpload);
+			console.log(
+				`[Upload Debug] Added file to FormData (native): ${sanitizedStagedFilename}, size: ${buffer.length} bytes, contentType: ${contentType}`
+			);
 		}
 
-		// Create upload body and headers
-		let retryUploadBody: BodyInit | undefined;
-		let retryUploadHeaders: HeadersInit = {};
-		let needsDuplex = false;
-
-		if (retryIsPolyfill) {
-			const polyfillFormData = retryFormData as unknown as {
-				getHeaders?: () => HeadersInit;
-				getBuffer?: () => Promise<Buffer> | Buffer;
-			} & NodeJS.ReadableStream;
-
-			// CRITICAL: For signed URLs, we MUST preserve the exact multipart format
-			// The signature includes the boundary in the Content-Type header
-			// getHeaders() and getBuffer() on the same FormData instance use the SAME boundary
-			// So we can use getBuffer() to serialize, as long as we use headers from the same instance
-
-			// IMPORTANT: Call getHeaders() FIRST to "lock in" the boundary
-			// Then getBuffer() will use the same boundary
-			if (typeof polyfillFormData.getHeaders === "function") {
-				retryUploadHeaders = polyfillFormData.getHeaders();
-			}
-
-			// Serialize using getBuffer() - this uses the SAME boundary as getHeaders() above
-			// Both methods operate on the same FormData instance, so boundaries match
-			if (typeof polyfillFormData.getBuffer === "function") {
-				try {
-					const formDataBufferResult = polyfillFormData.getBuffer();
-					const serializedFormData =
-						formDataBufferResult instanceof Promise
-							? await formDataBufferResult
-							: formDataBufferResult;
-					retryUploadBody = new Uint8Array(serializedFormData);
-					needsDuplex = false;
-				} catch (error) {
-					throw new Error(
-						`Failed to serialize FormData: ${error instanceof Error ? error.message : String(error)}`
-					);
-				}
-			} else {
-				// Fallback: use stream if getBuffer() not available
-				retryUploadBody = polyfillFormData as unknown as BodyInit;
-				needsDuplex = true;
-			}
-		} else {
-			// Native FormData - use directly (fetch handles Content-Type automatically)
-			retryUploadBody = retryFormData;
-			needsDuplex = false;
-		}
-
-		if (!retryUploadBody) {
-			throw new Error("Failed to create upload body");
-		}
-
-		return {
-			body: retryUploadBody,
-			headers: retryUploadHeaders,
-			needsDuplex,
-		};
+		return retryFormData;
 	};
 
 	// Retry logic for transient network failures
+	// Using axios with form-data stream directly (not getBuffer()) to preserve signature
 	const MAX_RETRIES = 3;
-	let uploadResponse: Response | null = null;
+	let uploadResponse: {
+		status: number;
+		statusText: string;
+		data: unknown;
+	} | null = null;
 	let lastError: Error | null = null;
 
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 		try {
-			// Create fresh FormData and upload body for each retry attempt
-			// This is critical because streams/buffers can only be consumed once
-			const {
-				body: uploadBody,
-				headers: uploadHeaders,
-				needsDuplex,
-			} = await createUploadBody();
+			// Create fresh FormData for each retry attempt
+			// This is critical because streams can only be consumed once
+			const formData = createFormData();
 
-			// Create abort controller for timeout (5 minutes for large files)
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+			// Detect if we're using the form-data polyfill
+			const isPolyfill =
+				"_boundary" in formData ||
+				typeof (formData as { _streams?: unknown })._streams !== "undefined";
+
+			// Get headers from form-data (includes Content-Type with boundary)
+			// Convert to Record<string, string> for axios compatibility
+			let uploadHeaders: Record<string, string> = {};
+			if (isPolyfill) {
+				const polyfillFormData = formData as unknown as {
+					getHeaders?: () => HeadersInit;
+				};
+				if (typeof polyfillFormData.getHeaders === "function") {
+					const rawHeaders = polyfillFormData.getHeaders();
+					// Convert HeadersInit to Record<string, string> for axios
+					if (rawHeaders instanceof Headers) {
+						rawHeaders.forEach((value, key) => {
+							uploadHeaders[key] = value;
+						});
+					} else if (Array.isArray(rawHeaders)) {
+						// Array of [key, value] pairs
+						for (const [key, value] of rawHeaders) {
+							uploadHeaders[key] = value;
+						}
+					} else {
+						// Record<string, string>
+						uploadHeaders = rawHeaders as Record<string, string>;
+					}
+
+					// Log headers for debugging (sanitize sensitive values)
+					const headersForLog: Record<string, string> = {};
+					for (const [key, value] of Object.entries(uploadHeaders)) {
+						if (key.toLowerCase() === "content-type") {
+							headersForLog[key] = value; // Log Content-Type fully (includes boundary)
+						} else {
+							headersForLog[key] =
+								value.length > 100 ? `${value.substring(0, 100)}...` : value;
+						}
+					}
+					console.log(
+						`[Upload Debug] Headers from getHeaders(): ${JSON.stringify(headersForLog, null, 2)}`
+					);
+				}
+			}
 
 			if (attempt > 1) {
 				console.log(
@@ -441,61 +437,95 @@ export async function uploadBynderAsset(
 				);
 			}
 
-			// Build fetch options
-			// CRITICAL: For signed URLs, we MUST use ONLY the headers from getHeaders()
-			// Do NOT add any extra headers - they will break the signature
-			// The signature was calculated based on specific headers, and any modification invalidates it
-			const fetchOptions: RequestInit & { duplex?: "half" } = {
-				method: "POST",
-				body: uploadBody,
-				headers: uploadHeaders, // Use headers exactly as provided by getHeaders()
-				signal: controller.signal,
-			};
-
-			// Add duplex mode if needed (for form-data polyfill streams)
-			if (needsDuplex) {
-				fetchOptions.duplex = "half";
-			}
-
-			// Log upload attempt details (without sensitive data)
+			// Log upload attempt details
 			if (attempt === 1) {
 				console.log(
-					`[Upload] Starting upload to Shopify staged URL (file: ${sanitizedStagedFilename}, size: ${buffer.length} bytes, needsDuplex: ${needsDuplex})`
+					`[Upload] Starting upload to Shopify staged URL using axios`
+				);
+				console.log(
+					`[Upload Debug] File: ${sanitizedStagedFilename}, size: ${buffer.length} bytes`
+				);
+				console.log(
+					`[Upload Debug] URL: ${stagedTarget.url.substring(0, 100)}...`
+				);
+				console.log(
+					`[Upload Debug] Using ${isPolyfill ? "form-data polyfill" : "native FormData"}`
 				);
 			}
 
+			// Use axios to upload - it handles form-data streams correctly
+			// CRITICAL: Pass form-data stream directly (not getBuffer())
+			// axios will stream it properly, preserving the boundary from getHeaders()
 			try {
-				uploadResponse = await fetch(stagedTarget.url, fetchOptions);
-			} catch (fetchError) {
-				// Enhanced error logging for debugging
-				const errorDetails =
-					fetchError instanceof Error
-						? {
-								name: fetchError.name,
-								message: fetchError.message,
-								stack: fetchError.stack,
-								cause: fetchError.cause,
-							}
-						: { error: String(fetchError) };
+				const axiosResponse = await axios.post(stagedTarget.url, formData, {
+					headers: uploadHeaders,
+					maxContentLength: Infinity,
+					maxBodyLength: Infinity,
+					timeout: 5 * 60 * 1000, // 5 minutes timeout
+					// Let axios handle the form-data stream - it will preserve the boundary
+				});
 
-				console.error(
-					`[Upload] Fetch error on attempt ${attempt}/${MAX_RETRIES}:`,
-					JSON.stringify(errorDetails, null, 2)
+				uploadResponse = {
+					status: axiosResponse.status,
+					statusText: axiosResponse.statusText,
+					data: axiosResponse.data,
+				};
+
+				console.log(
+					`[Upload Debug] Upload successful: HTTP ${uploadResponse.status} ${uploadResponse.statusText}`
 				);
+				lastError = null;
+				break; // Success, exit retry loop
+			} catch (axiosError) {
+				// Enhanced error logging for debugging
+				if (axios.isAxiosError(axiosError)) {
+					const errorDetails = {
+						message: axiosError.message,
+						status: axiosError.response?.status,
+						statusText: axiosError.response?.statusText,
+						responseData:
+							axiosError.response?.data &&
+							typeof axiosError.response.data === "string"
+								? axiosError.response.data.substring(0, 500)
+								: String(axiosError.response?.data).substring(0, 500),
+						headers: axiosError.response?.headers,
+					};
+					console.error(
+						`[Upload Debug] Axios error on attempt ${attempt}/${MAX_RETRIES}:`,
+						JSON.stringify(errorDetails, null, 2)
+					);
+					lastError = axiosError;
+				} else {
+					const errorDetails =
+						axiosError instanceof Error
+							? {
+									name: axiosError.name,
+									message: axiosError.message,
+									stack: axiosError.stack,
+								}
+							: { error: String(axiosError) };
+					console.error(
+						`[Upload Debug] Unknown error on attempt ${attempt}/${MAX_RETRIES}:`,
+						JSON.stringify(errorDetails, null, 2)
+					);
+					lastError =
+						axiosError instanceof Error
+							? axiosError
+							: new Error(String(axiosError));
+				}
 
 				// Re-throw to be handled by retry logic
-				throw fetchError;
+				throw axiosError;
 			}
-
-			clearTimeout(timeoutId);
-			lastError = null;
-			break; // Success, exit retry loop
 		} catch (error) {
 			lastError = error instanceof Error ? error : new Error(String(error));
 			const errorMessage = lastError.message;
 
-			// Don't retry on timeout or abort errors
-			if (lastError.name === "AbortError") {
+			// Don't retry on timeout errors
+			if (
+				lastError.message.includes("timeout") ||
+				lastError.message.includes("ETIMEDOUT")
+			) {
 				throw new Error(
 					`Upload timeout: File upload to Shopify took longer than 5 minutes. This may indicate a network issue or the file is too large. URL: ${stagedTarget.url}`
 				);
@@ -524,20 +554,9 @@ export async function uploadBynderAsset(
 		);
 	}
 
-	if (!uploadResponse.ok) {
+	if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
 		const statusText = uploadResponse.statusText || "Unknown error";
 		const statusCode = uploadResponse.status;
-
-		// Try to get more details from the response body
-		let errorDetails = statusText;
-		try {
-			const errorBody = await uploadResponse.text();
-			if (errorBody && errorBody.length < 1000) {
-				errorDetails = `${statusText} - ${errorBody}`;
-			}
-		} catch {
-			// Ignore errors reading response body
-		}
 
 		// Log the staged upload URL and parameters for debugging (without sensitive values)
 		console.error(
@@ -546,9 +565,20 @@ export async function uploadBynderAsset(
 		console.error(
 			`[Upload Error] Parameters: ${stagedTarget.parameters.map((p: { name: string; value: string }) => p.name).join(", ")}`
 		);
+		console.error(
+			`[Upload Error] Response status: ${statusCode} ${statusText}`
+		);
+		console.error(
+			`[Upload Error] Response data: ${typeof uploadResponse.data === "string" ? uploadResponse.data.substring(0, 500) : JSON.stringify(uploadResponse.data).substring(0, 500)}`
+		);
+
+		const errorDetails =
+			typeof uploadResponse.data === "string"
+				? uploadResponse.data.substring(0, 1000)
+				: String(uploadResponse.data).substring(0, 1000);
 
 		throw new Error(
-			`Failed to upload file to staged URL: HTTP ${statusCode}: ${errorDetails}`
+			`Failed to upload file to staged URL: HTTP ${statusCode}: ${statusText} - ${errorDetails}`
 		);
 	}
 

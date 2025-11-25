@@ -35,6 +35,9 @@ importers:
       '@shopify/shopify-app-session-storage-prisma':
         specifier: ^7.0.0
         version: 7.0.3(@prisma/client@6.19.0(prisma@6.19.0(typescript@5.9.3))(typescript@5.9.3))(@shopify/shopify-api@12.1.2)(@shopify/shopify-app-session-storage@4.0.3(@shopify/shopify-api@12.1.2))(prisma@6.19.0(typescript@5.9.3))
+      axios:
+        specifier: ^1.13.2
+        version: 1.13.2
       isbot:
         specifier: ^5.1.31
         version: 5.1.32
@@ -1503,6 +1506,9 @@ packages:
 
   axios@0.30.2:
     resolution: {integrity: sha512-0pE4RQ4UQi1jKY6p7u6i1Tkzqmu+d+/tHS7Q7rKunWLB9WyilBTpHHpXzPNMDj5hTbK0B0PTLSz07yqMBiF6xg==}
+
+  axios@1.13.2:
+    resolution: {integrity: sha512-VPk9ebNqPcy5lRGuSlKx752IlDatOjT9paPlm8A7yOuW2Fbvp4X3JznJtT4f0GzGLLiWE9W8onz51SqLYwzGaA==}
 
   babel-dead-code-elimination@1.0.10:
     resolution: {integrity: sha512-DV5bdJZTzZ0zn0DC24v3jD7Mnidh6xhKa4GfKCbq3sfW8kaWhDdZjP3i81geA8T33tdYqWKw4D3fVv0CwEgKVA==}
@@ -5204,6 +5210,14 @@ snapshots:
   auto-bind@4.0.0: {}
 
   axios@0.30.2:
+    dependencies:
+      follow-redirects: 1.15.11
+      form-data: 4.0.5
+      proxy-from-env: 1.1.0
+    transitivePeerDependencies:
+      - debug
+
+  axios@1.13.2:
     dependencies:
       follow-redirects: 1.15.11
       form-data: 4.0.5

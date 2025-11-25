@@ -481,8 +481,23 @@ export async function uploadBynderAsset(
 				console.log(
 					`[Upload Debug] FormData type: ${isPolyfill ? "polyfill" : "native"}, has getHeaders: ${typeof (formData as unknown as { getHeaders?: () => HeadersInit }).getHeaders === "function"}`
 				);
+				// Count FormData entries - polyfill doesn't have entries() method
+				let formDataEntryCount = 0;
+				if (typeof formData.entries === "function") {
+					// Native FormData
+					formDataEntryCount = Array.from(formData.entries()).length;
+				} else if (isPolyfill) {
+					// form-data polyfill - count manually
+					const polyfillFormData = formData as unknown as {
+						_streams?: unknown[];
+						_length?: number;
+					};
+					// The polyfill stores entries in _streams array (rough count)
+					formDataEntryCount =
+						polyfillFormData._streams?.length || polyfillFormData._length || 0;
+				}
 				console.log(
-					`[Upload Debug] Number of FormData entries: ${Array.from(formData.entries()).length}`
+					`[Upload Debug] Number of FormData entries: ${formDataEntryCount}`
 				);
 
 				// CRITICAL: For GCS signed URLs, we might need to NOT set Content-Type manually

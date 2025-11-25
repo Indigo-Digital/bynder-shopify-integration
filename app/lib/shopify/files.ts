@@ -402,25 +402,19 @@ export async function uploadBynderAsset(
 				"_boundary" in formData ||
 				typeof (formData as { _streams?: unknown })._streams !== "undefined";
 
-			// Get headers and body from form-data polyfill
-			// CRITICAL: For GCS signed URLs, we MUST use getBuffer() + getHeaders() together
-			// to ensure the boundary in Content-Type matches the actual body format
-			let uploadBodyInit: FormData | Buffer | Uint8Array = formData;
+			// Get headers from form-data polyfill
+			// CRITICAL: For GCS signed URLs, we need to use getHeaders() to get the Content-Type
+			// with the correct boundary, but pass the FormData stream directly to axios
+			// (not getBuffer()) to preserve the exact format Shopify expects
 			let uploadHeaders: Record<string, string> = {};
 
 			if (isPolyfill) {
 				const polyfillFormData = formData as unknown as {
 					getHeaders?: () => HeadersInit;
-					getBuffer?: () => Buffer;
 				};
 
-				// CRITICAL: Call getHeaders() FIRST to lock in the boundary
-				// Then call getBuffer() to get the body with that exact boundary
-				if (
-					typeof polyfillFormData.getHeaders === "function" &&
-					typeof polyfillFormData.getBuffer === "function"
-				) {
-					// Step 1: Get headers (locks in boundary)
+				// Get headers (includes Content-Type with boundary)
+				if (typeof polyfillFormData.getHeaders === "function") {
 					const rawHeaders = polyfillFormData.getHeaders();
 
 					// Convert HeadersInit to Record<string, string>
@@ -436,10 +430,6 @@ export async function uploadBynderAsset(
 						uploadHeaders = rawHeaders as Record<string, string>;
 					}
 
-					// Step 2: Get buffer (uses the boundary from step 1)
-					const bodyBuffer = polyfillFormData.getBuffer();
-					uploadBodyInit = bodyBuffer;
-
 					// Log headers for debugging
 					const headersForLog: Record<string, string> = {};
 					for (const [key, value] of Object.entries(uploadHeaders)) {
@@ -451,17 +441,14 @@ export async function uploadBynderAsset(
 						}
 					}
 					console.log(
-						`[Upload Debug] Using form-data polyfill with getBuffer() + getHeaders()`
+						`[Upload Debug] Using form-data polyfill with getHeaders() - passing FormData stream to axios`
 					);
 					console.log(
 						`[Upload Debug] Headers: ${JSON.stringify(headersForLog, null, 2)}`
 					);
-					console.log(
-						`[Upload Debug] Body buffer size: ${bodyBuffer.length} bytes`
-					);
 				} else {
 					console.log(
-						`[Upload Debug] WARNING: form-data polyfill detected but getHeaders() or getBuffer() not available`
+						`[Upload Debug] WARNING: form-data polyfill detected but getHeaders() not available`
 					);
 				}
 			} else {
@@ -575,10 +562,11 @@ export async function uploadBynderAsset(
 					`[Upload Debug] About to send axios POST request with config: ${JSON.stringify({ url: stagedTarget.url.substring(0, 100), hasHeaders: Object.keys(axiosConfig.headers || {}).length > 0, headers: axiosConfig.headers }, null, 2)}`
 				);
 
-				// Use the body we prepared (either FormData stream or Buffer)
+				// Pass FormData stream directly to axios - it will stream it correctly
+				// The headers from getHeaders() ensure Content-Type boundary matches
 				const axiosResponse = await axios.post(
 					stagedTarget.url,
-					uploadBodyInit,
+					formData,
 					axiosConfig
 				);
 

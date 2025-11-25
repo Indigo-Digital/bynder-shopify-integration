@@ -264,6 +264,17 @@ export async function uploadBynderAsset(
 		);
 	}
 
+	// Log staged upload details for debugging
+	console.log(
+		`[Upload Debug] Staged upload URL: ${stagedTarget.url.substring(0, 150)}...`
+	);
+	console.log(
+		`[Upload Debug] Staged upload parameters count: ${stagedTarget.parameters.length}`
+	);
+	console.log(
+		`[Upload Debug] Staged upload parameter names: ${stagedTarget.parameters.map((p: { name: string }) => p.name).join(", ")}`
+	);
+
 	// Step 2: Upload file to staged upload URL
 	// For Shopify staged uploads (typically S3), we need to:
 	// 1. Add all parameters first (in order)
@@ -454,16 +465,78 @@ export async function uploadBynderAsset(
 			}
 
 			// Use axios to upload - it handles form-data streams correctly
-			// CRITICAL: Pass form-data stream directly (not getBuffer())
-			// axios will stream it properly, preserving the boundary from getHeaders()
+			// CRITICAL: For GCS signed URLs with X-Goog-SignedHeaders=host, only host header is signed
+			// But the request body (multipart form) must still match exactly what was signed
+			// The issue might be that axios modifies Content-Type or the request format
 			try {
-				const axiosResponse = await axios.post(stagedTarget.url, formData, {
-					headers: uploadHeaders,
+				// Log the exact URL and headers before sending
+				const urlObj = new URL(stagedTarget.url);
+				console.log(`[Upload Debug] Upload URL path: ${urlObj.pathname}`);
+				console.log(
+					`[Upload Debug] URL query params: ${Array.from(urlObj.searchParams.keys()).join(", ")}`
+				);
+				console.log(
+					`[Upload Debug] Headers being sent: ${JSON.stringify(uploadHeaders, null, 2)}`
+				);
+				console.log(
+					`[Upload Debug] FormData type: ${isPolyfill ? "polyfill" : "native"}, has getHeaders: ${typeof (formData as unknown as { getHeaders?: () => HeadersInit }).getHeaders === "function"}`
+				);
+				console.log(
+					`[Upload Debug] Number of FormData entries: ${Array.from(formData.entries()).length}`
+				);
+
+				// CRITICAL: For GCS signed URLs, we might need to NOT set Content-Type manually
+				// and let axios/form-data set it automatically, OR ensure it matches exactly
+				// Try without manually setting Content-Type first - let axios handle it
+				const axiosConfig: {
+					headers?: Record<string, string>;
+					maxContentLength: number;
+					maxBodyLength: number;
+					timeout: number;
+					validateStatus: () => boolean;
+				} = {
 					maxContentLength: Infinity,
 					maxBodyLength: Infinity,
-					timeout: 5 * 60 * 1000, // 5 minutes timeout
-					// Let axios handle the form-data stream - it will preserve the boundary
-				});
+					timeout: 5 * 60 * 1000,
+					validateStatus: () => true, // Don't throw on error status codes
+				};
+
+				// CRITICAL: For GCS signed URLs, the signature calculation includes the request body
+				// Even though X-Goog-SignedHeaders=host (only host header signed), the body hash matters
+				// We need to ensure Content-Type boundary matches the actual body format
+				//
+				// IMPORTANT: Axios may automatically set Content-Type when FormData is passed
+				// We MUST prevent this and use our manually set Content-Type from getHeaders()
+				// to ensure the boundary matches what form-data generated
+				if (Object.keys(uploadHeaders).length > 0) {
+					// Set headers explicitly - axios should respect these and not override
+					axiosConfig.headers = {
+						...uploadHeaders,
+						// Explicitly prevent axios from modifying Content-Type
+						"Content-Type":
+							uploadHeaders["content-type"] ||
+							uploadHeaders["Content-Type"] ||
+							"",
+					};
+					console.log(
+						`[Upload Debug] Using headers from getHeaders() - Content-Type: ${axiosConfig.headers["Content-Type"] || axiosConfig.headers["content-type"] || "not set"}`
+					);
+				} else {
+					console.log(
+						`[Upload Debug] WARNING: No headers from getHeaders() - axios will set Content-Type automatically (may break signature)`
+					);
+				}
+
+				// Log the exact request we're about to send
+				console.log(
+					`[Upload Debug] About to send axios POST request with config: ${JSON.stringify({ url: stagedTarget.url.substring(0, 100), hasHeaders: Object.keys(axiosConfig.headers || {}).length > 0, headers: axiosConfig.headers }, null, 2)}`
+				);
+
+				const axiosResponse = await axios.post(
+					stagedTarget.url,
+					formData,
+					axiosConfig
+				);
 
 				uploadResponse = {
 					status: axiosResponse.status,

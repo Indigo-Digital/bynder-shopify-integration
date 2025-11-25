@@ -1,261 +1,290 @@
-import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect } from "react";
-import type {
-	ActionFunctionArgs,
-	HeadersFunction,
-	LoaderFunctionArgs,
-} from "react-router";
-import { useFetcher } from "react-router";
-import { authenticate } from "../shopify.server";
+import type { LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
+import prisma from "../db.server.js";
+import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-	await authenticate.admin(request);
+	const { session } = await authenticate.admin(request);
+	const shop = session.shop;
 
-	return null;
-};
+	const shopConfig = await prisma.shop.findUnique({
+		where: { shop },
+	});
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-	const { admin } = await authenticate.admin(request);
-	const color = ["Red", "Orange", "Yellow", "Green"][
-		Math.floor(Math.random() * 4)
-	];
-	const response = await admin.graphql(
-		`#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-          }
-        }
-      }`,
-		{
-			variables: {
-				product: {
-					title: `${color} Snowboard`,
-				},
-			},
-		}
-	);
-	const responseJson = await response.json();
-
-	const product = responseJson.data?.productCreate?.product;
-	if (!product) {
-		throw new Error("Failed to create product");
+	if (!shopConfig) {
+		return {
+			shop,
+			shopConfig: null,
+			stats: null,
+			recentJobs: [],
+			connectionStatus: false,
+		};
 	}
 
-	const variantId = product.variants.edges[0]?.node?.id;
-	if (!variantId) {
-		throw new Error("Failed to get variant ID");
-	}
+	// Get sync stats
+	const totalSynced = await prisma.syncedAsset.count({
+		where: { shopId: shopConfig.id },
+	});
 
-	const variantResponse = await admin.graphql(
-		`#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-		{
-			variables: {
-				productId: product.id,
-				variants: [{ id: variantId, price: "100.00" }],
-			},
-		}
+	const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+	const syncedLast24h = await prisma.syncedAsset.count({
+		where: {
+			shopId: shopConfig.id,
+			syncedAt: { gte: last24Hours },
+		},
+	});
+
+	// Get recent sync jobs for stats
+	const recentJobs = await prisma.syncJob.findMany({
+		where: { shopId: shopConfig.id },
+		orderBy: { createdAt: "desc" },
+		take: 5,
+	});
+
+	const lastSuccessfulJob = recentJobs.find(
+		(job) => job.status === "completed"
 	);
+	const lastJob = recentJobs[0] || null;
 
-	const variantResponseJson = await variantResponse.json();
+	// Calculate success rate (last 5 jobs)
+	const completedJobs = recentJobs.filter((job) => job.status === "completed");
+	const successRate =
+		recentJobs.length > 0
+			? Math.round((completedJobs.length / recentJobs.length) * 100)
+			: null;
+
+	// Check connection status
+	const connectionStatus = !!shopConfig.bynderBaseUrl;
 
 	return {
-		product: responseJson?.data?.productCreate?.product,
-		variant:
-			variantResponseJson?.data?.productVariantsBulkUpdate?.productVariants,
+		shop,
+		shopConfig,
+		stats: {
+			totalSynced,
+			syncedLast24h,
+			lastSuccessfulSync: lastSuccessfulJob?.completedAt || null,
+			lastSyncStatus: lastJob?.status || null,
+			lastSyncTime: lastJob?.completedAt || lastJob?.startedAt || null,
+			successRate,
+		},
+		recentJobs,
+		connectionStatus,
 	};
 };
 
-export default function Index() {
-	const fetcher = useFetcher<typeof action>();
+export default function Dashboard() {
+	const { shopConfig, stats, recentJobs, connectionStatus } =
+		useLoaderData<typeof loader>();
+	const fetcher = useFetcher();
 
-	const shopify = useAppBridge();
-	const isLoading =
-		["loading", "submitting"].includes(fetcher.state) &&
-		fetcher.formMethod === "POST";
-
-	useEffect(() => {
-		if (fetcher.data?.product?.id) {
-			shopify.toast.show("Product created");
-		}
-	}, [fetcher.data?.product?.id, shopify]);
-
-	const generateProduct = () => fetcher.submit({}, { method: "POST" });
+	if (!shopConfig || !connectionStatus) {
+		return (
+			<s-page heading="Bynder Integration Dashboard">
+				<s-section>
+					<s-banner tone="warning">
+						<s-paragraph>
+							<strong>Setup Required:</strong> Please configure your Bynder
+							connection in <s-link href="/app/settings">Settings</s-link> to
+							get started.
+						</s-paragraph>
+					</s-banner>
+					<div style={{ marginTop: "1rem" }}>
+						<s-stack direction="block" gap="base">
+							<s-heading>Quick Actions</s-heading>
+							<s-stack direction="inline" gap="base">
+								<s-button variant="primary" href="/app/settings">
+									Go to Settings
+								</s-button>
+								<s-button variant="secondary" href="/app/files">
+									View Files
+								</s-button>
+							</s-stack>
+						</s-stack>
+					</div>
+				</s-section>
+			</s-page>
+		);
+	}
 
 	return (
-		<s-page heading="Shopify app template">
-			<s-button slot="primary-action" onClick={generateProduct}>
-				Generate a product
-			</s-button>
+		<s-page heading="Bynder Integration Dashboard">
+			{/* Connection Status Banner */}
+			{connectionStatus && (
+				<s-banner tone="success">
+					<s-paragraph>
+						<strong>Connected:</strong> Bynder integration is configured and
+						ready.
+					</s-paragraph>
+				</s-banner>
+			)}
 
-			<s-section heading="Congrats on creating a new Shopify app 🎉">
-				<s-paragraph>
-					This embedded app template uses{" "}
-					<s-link
-						href="https://shopify.dev/docs/apps/tools/app-bridge"
-						target="_blank"
-					>
-						App Bridge
-					</s-link>{" "}
-					interface examples like an{" "}
-					<s-link href="/app/additional">additional page in the app nav</s-link>
-					, as well as an{" "}
-					<s-link
-						href="https://shopify.dev/docs/api/admin-graphql"
-						target="_blank"
-					>
-						Admin GraphQL
-					</s-link>{" "}
-					mutation demo, to provide a starting point for app development.
-				</s-paragraph>
-			</s-section>
-			<s-section heading="Get started with products">
-				<s-paragraph>
-					Generate a product with GraphQL and get the JSON output for that
-					product. Learn more about the{" "}
-					<s-link
-						href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-						target="_blank"
-					>
-						productCreate
-					</s-link>{" "}
-					mutation in our API references.
-				</s-paragraph>
+			{/* Stats Cards */}
+			{stats && (
+				<s-section heading="Sync Statistics">
+					<s-stack direction="inline" gap="base">
+						<s-box padding="base" borderWidth="base" borderRadius="base">
+							<s-text>Total Synced Assets</s-text>
+							<s-heading>{stats.totalSynced}</s-heading>
+						</s-box>
+						<s-box padding="base" borderWidth="base" borderRadius="base">
+							<s-text>Synced Last 24 Hours</s-text>
+							<s-heading>{stats.syncedLast24h}</s-heading>
+						</s-box>
+						{stats.successRate !== null && (
+							<s-box padding="base" borderWidth="base" borderRadius="base">
+								<s-text>Success Rate</s-text>
+								<s-heading>{stats.successRate}%</s-heading>
+							</s-box>
+						)}
+						{stats.lastSyncTime && (
+							<s-box padding="base" borderWidth="base" borderRadius="base">
+								<s-text>Last Sync</s-text>
+								<s-heading>
+									{new Date(stats.lastSyncTime).toLocaleString()}
+								</s-heading>
+								{stats.lastSyncStatus && (
+									<div style={{ fontSize: "0.75rem", color: "#666" }}>
+										Status: {stats.lastSyncStatus}
+									</div>
+								)}
+							</s-box>
+						)}
+					</s-stack>
+				</s-section>
+			)}
+
+			{/* Quick Actions */}
+			<s-section heading="Quick Actions">
 				<s-stack direction="inline" gap="base">
-					<s-button
-						onClick={generateProduct}
-						{...(isLoading ? { loading: true } : {})}
-					>
-						Generate a product
-					</s-button>
-					{fetcher.data?.product && (
+					<fetcher.Form method="POST" action="/api/sync">
 						<s-button
-							onClick={() => {
-								shopify.intents.invoke?.("edit:shopify/Product", {
-									value: fetcher.data?.product?.id,
-								});
-							}}
-							target="_blank"
-							variant="tertiary"
+							type="submit"
+							variant="primary"
+							disabled={fetcher.state !== "idle"}
 						>
-							Edit product
+							{fetcher.state !== "idle" ? "Syncing..." : "Sync Now"}
 						</s-button>
-					)}
+					</fetcher.Form>
+					<s-button variant="secondary" href="/app/files">
+						View Files
+					</s-button>
+					<s-button variant="secondary" href="/app/sync">
+						Sync Dashboard
+					</s-button>
+					<s-button variant="secondary" href="/app/settings">
+						Settings
+					</s-button>
 				</s-stack>
-				{fetcher.data?.product && (
-					<s-section heading="productCreate mutation">
-						<s-stack direction="block" gap="base">
+			</s-section>
+
+			{/* Recent Activity */}
+			{recentJobs.length > 0 && (
+				<s-section heading="Recent Activity">
+					<s-stack direction="block" gap="base">
+						{recentJobs.map((job) => (
 							<s-box
+								key={job.id}
 								padding="base"
 								borderWidth="base"
 								borderRadius="base"
-								background="subdued"
 							>
-								<pre style={{ margin: 0 }}>
-									<code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-								</pre>
+								<s-stack direction="inline" gap="base" alignItems="center">
+									<span
+										style={{
+											padding: "0.25rem 0.5rem",
+											borderRadius: "4px",
+											fontSize: "0.75rem",
+											fontWeight: "600",
+											textTransform: "uppercase",
+											backgroundColor:
+												job.status === "completed"
+													? "#d4edda"
+													: job.status === "failed"
+														? "#f8d7da"
+														: job.status === "running"
+															? "#fff3cd"
+															: "#e2e3e5",
+											color:
+												job.status === "completed"
+													? "#155724"
+													: job.status === "failed"
+														? "#721c24"
+														: job.status === "running"
+															? "#856404"
+															: "#383d41",
+										}}
+									>
+										{job.status}
+									</span>
+									<s-text>
+										<strong>
+											{job.startedAt
+												? new Date(job.startedAt).toLocaleString()
+												: "Not started"}
+										</strong>
+									</s-text>
+									{job.assetsProcessed > 0 && (
+										<s-text>
+											{job.assetsProcessed} asset
+											{job.assetsProcessed !== 1 ? "s" : ""} processed
+										</s-text>
+									)}
+									{job.assetsCreated !== undefined && job.assetsCreated > 0 && (
+										<span style={{ color: "#155724" }}>
+											{job.assetsCreated} created
+										</span>
+									)}
+									{job.assetsUpdated !== undefined && job.assetsUpdated > 0 && (
+										<span style={{ color: "#856404" }}>
+											{job.assetsUpdated} updated
+										</span>
+									)}
+									{job.status === "running" && (
+										<span
+											style={{
+												display: "inline-block",
+												width: "12px",
+												height: "12px",
+												border: "2px solid #856404",
+												borderTopColor: "transparent",
+												borderRadius: "50%",
+												animation: "spin 1s linear infinite",
+											}}
+										/>
+									)}
+								</s-stack>
+								{job.error && (
+									<div style={{ marginTop: "0.5rem", color: "#721c24" }}>
+										Error: {job.error}
+									</div>
+								)}
 							</s-box>
+						))}
+						<style>
+							{`
+								@keyframes spin {
+									to { transform: rotate(360deg); }
+								}
+							`}
+						</style>
+					</s-stack>
+					<div style={{ marginTop: "1rem" }}>
+						<s-link href="/app/sync">View all sync jobs →</s-link>
+					</div>
+				</s-section>
+			)}
 
-							<s-heading>productVariantsBulkUpdate mutation</s-heading>
-							<s-box
-								padding="base"
-								borderWidth="base"
-								borderRadius="base"
-								background="subdued"
-							>
-								<pre style={{ margin: 0 }}>
-									<code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-								</pre>
-							</s-box>
-						</s-stack>
-					</s-section>
-				)}
-			</s-section>
-
-			<s-section slot="aside" heading="App template specs">
-				<s-paragraph>
-					<s-text>Framework: </s-text>
-					<s-link href="https://reactrouter.com/" target="_blank">
-						React Router
-					</s-link>
-				</s-paragraph>
-				<s-paragraph>
-					<s-text>Interface: </s-text>
-					<s-link
-						href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-						target="_blank"
-					>
-						Polaris web components
-					</s-link>
-				</s-paragraph>
-				<s-paragraph>
-					<s-text>API: </s-text>
-					<s-link
-						href="https://shopify.dev/docs/api/admin-graphql"
-						target="_blank"
-					>
-						GraphQL
-					</s-link>
-				</s-paragraph>
-				<s-paragraph>
-					<s-text>Database: </s-text>
-					<s-link href="https://www.prisma.io/" target="_blank">
-						Prisma
-					</s-link>
-				</s-paragraph>
-			</s-section>
-
-			<s-section slot="aside" heading="Next steps">
-				<s-unordered-list>
-					<s-list-item>
-						Build an{" "}
-						<s-link
-							href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-							target="_blank"
-						>
-							example app
-						</s-link>
-					</s-list-item>
-					<s-list-item>
-						Explore Shopify&apos;s API with{" "}
-						<s-link
-							href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-							target="_blank"
-						>
-							GraphiQL
-						</s-link>
-					</s-list-item>
-				</s-unordered-list>
-			</s-section>
+			{recentJobs.length === 0 && (
+				<s-section heading="Recent Activity">
+					<s-paragraph>
+						No sync jobs yet. Click "Sync Now" to start syncing assets from
+						Bynder.
+					</s-paragraph>
+				</s-section>
+			)}
 		</s-page>
 	);
 }
 
-export const headers: HeadersFunction = (headersArgs) => {
-	return boundary.headers(headersArgs);
-};
+export const headers = boundary.headers;

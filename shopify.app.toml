@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "f9f30eb52cc6fee1672b70128616dabb"
-name = "bynder-integration"
+name = "Bynder Integration"
 application_url = "https://bynder-shopify-integration.fly.dev"
 embedded = true
 

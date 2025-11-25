@@ -367,27 +367,26 @@ export async function uploadBynderAsset(
 				getBuffer?: () => Promise<Buffer> | Buffer;
 			} & NodeJS.ReadableStream;
 
-			// Get headers first (for Content-Type with boundary)
+			// CRITICAL: For signed URLs, we MUST preserve the exact multipart format
+			// The signature includes the boundary in the Content-Type header
+			// getHeaders() and getBuffer() on the same FormData instance use the SAME boundary
+			// So we can use getBuffer() to serialize, as long as we use headers from the same instance
+
+			// IMPORTANT: Call getHeaders() FIRST to "lock in" the boundary
+			// Then getBuffer() will use the same boundary
 			if (typeof polyfillFormData.getHeaders === "function") {
 				retryUploadHeaders = polyfillFormData.getHeaders();
 			}
 
-			// CRITICAL: Serialize FormData to buffer using getBuffer()
-			// This preserves the exact multipart format including boundaries
-			// The signature will still work because:
-			// 1. getBuffer() produces the exact serialized form data
-			// 2. getHeaders() provides the Content-Type header with matching boundary
-			// 3. The boundary in header matches the boundary in the serialized data
-			// 4. The signature is calculated on the exact request format, which we preserve
+			// Serialize using getBuffer() - this uses the SAME boundary as getHeaders() above
+			// Both methods operate on the same FormData instance, so boundaries match
 			if (typeof polyfillFormData.getBuffer === "function") {
 				try {
 					const formDataBufferResult = polyfillFormData.getBuffer();
-					// Handle both sync and async getBuffer
 					const serializedFormData =
 						formDataBufferResult instanceof Promise
 							? await formDataBufferResult
 							: formDataBufferResult;
-					// Convert Buffer to Uint8Array for BodyInit
 					retryUploadBody = new Uint8Array(serializedFormData);
 					needsDuplex = false;
 				} catch (error) {
@@ -396,12 +395,12 @@ export async function uploadBynderAsset(
 					);
 				}
 			} else {
-				// Fallback: use stream directly (may not work in all environments)
+				// Fallback: use stream if getBuffer() not available
 				retryUploadBody = polyfillFormData as unknown as BodyInit;
 				needsDuplex = true;
 			}
 		} else {
-			// Native FormData - use directly
+			// Native FormData - use directly (fetch handles Content-Type automatically)
 			retryUploadBody = retryFormData;
 			needsDuplex = false;
 		}
@@ -443,10 +442,13 @@ export async function uploadBynderAsset(
 			}
 
 			// Build fetch options
+			// CRITICAL: For signed URLs, we MUST use ONLY the headers from getHeaders()
+			// Do NOT add any extra headers - they will break the signature
+			// The signature was calculated based on specific headers, and any modification invalidates it
 			const fetchOptions: RequestInit & { duplex?: "half" } = {
 				method: "POST",
 				body: uploadBody,
-				headers: uploadHeaders,
+				headers: uploadHeaders, // Use headers exactly as provided by getHeaders()
 				signal: controller.signal,
 			};
 

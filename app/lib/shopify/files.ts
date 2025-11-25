@@ -536,37 +536,57 @@ export async function uploadBynderAsset(
 					validateStatus: () => true, // Don't throw on error status codes
 				};
 
-				// CRITICAL: For GCS signed URLs, we MUST use the exact headers from getHeaders()
-				// and the exact body from getBuffer() to ensure the boundary matches
-				if (Object.keys(uploadHeaders).length > 0) {
-					// Set headers explicitly - these MUST match the body format exactly
-					axiosConfig.headers = uploadHeaders;
+				// CRITICAL: For GCS signed URLs, we MUST use native fetch with the exact Buffer
+				// from getBuffer() and exact headers from getHeaders() to avoid any modifications
+				// axios might make to the request
+				if (
+					uploadBody instanceof Buffer &&
+					Object.keys(uploadHeaders).length > 0
+				) {
 					console.log(
-						`[Upload Debug] Using headers from getHeaders() - Content-Type: ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "not set"}`
+						`[Upload Debug] Using native fetch with Buffer from getBuffer() and headers from getHeaders()`
 					);
+					console.log(
+						`[Upload Debug] Content-Type: ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "not set"}`
+					);
+					console.log(
+						`[Upload Debug] Body buffer size: ${uploadBody.length} bytes`
+					);
+
+					// Use native fetch to avoid axios modifications
+					// Convert Buffer to Uint8Array for fetch API
+					const bodyArray = new Uint8Array(uploadBody);
+					const fetchResponse = await fetch(stagedTarget.url, {
+						method: "POST",
+						body: bodyArray,
+						headers: uploadHeaders,
+					});
+
+					const responseData = await fetchResponse.text();
+					uploadResponse = {
+						status: fetchResponse.status,
+						statusText: fetchResponse.statusText,
+						data: responseData,
+					};
 				} else {
+					// Fallback to axios if we don't have buffer + headers
 					console.log(
-						`[Upload Debug] WARNING: No headers from getHeaders() - axios will set Content-Type automatically (may break signature)`
+						`[Upload Debug] WARNING: Falling back to axios - buffer: ${uploadBody instanceof Buffer}, headers: ${Object.keys(uploadHeaders).length > 0}`
 					);
+					if (Object.keys(uploadHeaders).length > 0) {
+						axiosConfig.headers = uploadHeaders;
+					}
+					const axiosResponse = await axios.post(
+						stagedTarget.url,
+						uploadBody,
+						axiosConfig
+					);
+					uploadResponse = {
+						status: axiosResponse.status,
+						statusText: axiosResponse.statusText,
+						data: axiosResponse.data,
+					};
 				}
-
-				// Log the exact request we're about to send
-				console.log(
-					`[Upload Debug] About to send axios POST request with body type: ${uploadBody instanceof Buffer ? "Buffer" : "FormData"}, size: ${uploadBody instanceof Buffer ? uploadBody.length : "unknown"} bytes`
-				);
-
-				// Use the buffer from getBuffer() if available, otherwise use FormData stream
-				const axiosResponse = await axios.post(
-					stagedTarget.url,
-					uploadBody,
-					axiosConfig
-				);
-
-				uploadResponse = {
-					status: axiosResponse.status,
-					statusText: axiosResponse.statusText,
-					data: axiosResponse.data,
-				};
 
 				console.log(
 					`[Upload Debug] Upload successful: HTTP ${uploadResponse.status} ${uploadResponse.statusText}`

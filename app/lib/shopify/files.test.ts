@@ -1,4 +1,3 @@
-import axios from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BynderClient } from "../bynder/client.js";
 import type { AdminApi } from "../types.js";
@@ -14,6 +13,9 @@ vi.mock("axios", () => ({
 		isAxiosError: vi.fn((error) => error?.isAxiosError === true),
 	},
 }));
+
+// Mock global fetch
+global.fetch = vi.fn();
 
 describe("uploadBynderAsset", () => {
 	const mockAdmin: AdminApi = {
@@ -67,11 +69,12 @@ describe("uploadBynderAsset", () => {
 			},
 		});
 
-		// Mock axios for upload to staged URL
-		(axios.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+		// Second fetch: Upload to staged URL (we're using fetch now instead of axios)
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
 			status: 200,
 			statusText: "OK",
-			data: "",
+			text: async () => "",
 		});
 
 		// Mock Shopify GraphQL responses
@@ -175,11 +178,12 @@ describe("uploadBynderAsset", () => {
 			},
 		});
 
-		// Mock axios for upload to staged URL
-		(axios.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+		// Second fetch: Upload to staged URL (we're using fetch now instead of axios)
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
 			status: 200,
 			statusText: "OK",
-			data: "",
+			text: async () => "",
 		});
 
 		// Mock Shopify GraphQL responses

@@ -847,12 +847,31 @@ export async function uploadBynderAsset(
 		const statusCode = uploadResponse.status;
 
 		// Log the staged upload URL and parameters for debugging (without sensitive values)
+		const errorUrlObj = new URL(stagedTarget.url);
 		console.error(
-			`[Upload Error] Failed to upload to staged URL: ${stagedTarget.url.substring(0, 100)}...`
+			`[Upload Error] Failed to upload to staged URL: ${stagedTarget.url.substring(0, 200)}...`
+		);
+		console.error(`[Upload Error] URL pathname: ${errorUrlObj.pathname}`);
+		console.error(
+			`[Upload Error] URL query string: ${errorUrlObj.search || "(none)"}`
+		);
+		if (errorUrlObj.search) {
+			console.error(
+				`[Upload Error] URL query param keys: ${Array.from(errorUrlObj.searchParams.keys()).join(", ")}`
+			);
+		}
+		console.error(
+			`[Upload Error] Parameters from Shopify: ${stagedTarget.parameters.map((p: { name: string; value: string }) => p.name).join(", ")}`
 		);
 		console.error(
-			`[Upload Error] Parameters: ${stagedTarget.parameters.map((p: { name: string; value: string }) => p.name).join(", ")}`
+			`[Upload Error] Parameter count: ${stagedTarget.parameters.length}`
 		);
+		// Log each parameter name (not values for security)
+		for (const param of stagedTarget.parameters) {
+			console.error(
+				`[Upload Error]   Parameter "${param.name}": value length ${param.value.length} chars`
+			);
+		}
 		console.error(
 			`[Upload Error] Response status: ${statusCode} ${statusText}`
 		);

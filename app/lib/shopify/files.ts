@@ -90,11 +90,16 @@ export async function uploadBynderAsset(
 	}
 ): Promise<{ fileId: string; fileUrl: string }> {
 	// Get asset info from Bynder
-	const assetInfoRaw = await bynderClient.getMediaInfo({
+	const getMediaInfoParams: Parameters<BynderClient["getMediaInfo"]>[0] = {
 		id: assetId,
-		shopId,
-		syncJobId: shopConfig?.syncJobId,
-	});
+	};
+	if (shopId) {
+		getMediaInfoParams.shopId = shopId;
+	}
+	if (shopConfig?.syncJobId) {
+		getMediaInfoParams.syncJobId = shopConfig.syncJobId;
+	}
+	const assetInfoRaw = await bynderClient.getMediaInfo(getMediaInfoParams);
 
 	if (!assetInfoRaw) {
 		throw new Error(`Asset ${assetId} not found in Bynder`);
@@ -122,11 +127,18 @@ export async function uploadBynderAsset(
 	let downloadUrlError: string | undefined;
 
 	try {
-		downloadUrl = await bynderClient.getMediaDownloadUrl({
+		const getDownloadUrlParams: Parameters<
+			BynderClient["getMediaDownloadUrl"]
+		>[0] = {
 			id: assetId,
-			shopId,
-			syncJobId: shopConfig?.syncJobId,
-		});
+		};
+		if (shopId) {
+			getDownloadUrlParams.shopId = shopId;
+		}
+		if (shopConfig?.syncJobId) {
+			getDownloadUrlParams.syncJobId = shopConfig.syncJobId;
+		}
+		downloadUrl = await bynderClient.getMediaDownloadUrl(getDownloadUrlParams);
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		downloadUrlError = `SDK method failed: ${errorMessage}`;

@@ -318,12 +318,11 @@ export default function SyncDashboard() {
 				</s-stack>
 				{metricsSummary && (
 					<div style={{ marginTop: "1rem" }}>
-						<s-heading level={3}>Performance Metrics (Last 10 Jobs)</s-heading>
-						<s-stack
-							direction="inline"
-							gap="base"
-							style={{ marginTop: "0.5rem" }}
-						>
+						<h3 style={{ marginBottom: "0.5rem" }}>
+							Performance Metrics (Last 10 Jobs)
+						</h3>
+						<div style={{ marginTop: "0.5rem" }}>
+							<s-stack direction="inline" gap="base">
 							<s-box padding="base" borderWidth="base" borderRadius="base">
 								<s-text>Avg Sync Duration</s-text>
 								<s-heading>
@@ -350,7 +349,7 @@ export default function SyncDashboard() {
 							</s-box>
 							<s-box padding="base" borderWidth="base" borderRadius="base">
 								<s-text>Error Rate Trend</s-text>
-								<s-heading
+								<div
 									style={{
 										color:
 											metricsSummary.errorRateTrend > 0
@@ -358,27 +357,27 @@ export default function SyncDashboard() {
 												: metricsSummary.errorRateTrend < 0
 													? "#008060"
 													: "#666",
+										fontSize: "1.5rem",
+										fontWeight: "bold",
 									}}
 								>
 									{metricsSummary.errorRateTrend !== 0
 										? `${metricsSummary.errorRateTrend > 0 ? "+" : ""}${metricsSummary.errorRateTrend.toFixed(1)}%`
 										: "0%"}
-								</s-heading>
+								</div>
 							</s-box>
 							{metricsSummary.rateLimitHits > 0 && (
-								<s-box
-									padding="base"
-									borderWidth="base"
-									borderRadius="base"
-									style={{ borderColor: "#d72c0d" }}
-								>
-									<s-text>Rate Limit Hits</s-text>
-									<s-heading style={{ color: "#d72c0d" }}>
-										{metricsSummary.rateLimitHits}
-									</s-heading>
+								<s-box padding="base" borderWidth="base" borderRadius="base">
+									<div style={{ border: "1px solid #d72c0d", padding: "0.5rem", borderRadius: "0.25rem" }}>
+										<s-text>Rate Limit Hits</s-text>
+										<div style={{ color: "#d72c0d", fontSize: "1.5rem", fontWeight: "bold" }}>
+											{metricsSummary.rateLimitHits}
+										</div>
+									</div>
 								</s-box>
 							)}
-						</s-stack>
+							</s-stack>
+						</div>
 					</div>
 				)}
 				<div style={{ marginTop: "1rem" }}>

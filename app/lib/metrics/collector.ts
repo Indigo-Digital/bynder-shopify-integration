@@ -51,11 +51,11 @@ export async function recordApiCall(
 ): Promise<void> {
 	await recordMetric({
 		shopId,
-		syncJobId,
+		syncJobId: syncJobId ?? undefined,
 		metricType: "api_call",
 		metricName: apiName,
 		value: 1,
-		metadata,
+		metadata: metadata ?? undefined,
 	});
 }
 
@@ -70,11 +70,11 @@ export async function recordSyncDuration(
 ): Promise<void> {
 	await recordMetric({
 		shopId,
-		syncJobId,
+		syncJobId: syncJobId ?? undefined,
 		metricType: "sync_duration",
 		metricName: "sync_duration_seconds",
 		value: durationSeconds,
-		metadata,
+		metadata: metadata ?? undefined,
 	});
 }
 
@@ -89,11 +89,11 @@ export async function recordThroughput(
 ): Promise<void> {
 	await recordMetric({
 		shopId,
-		syncJobId,
+		syncJobId: syncJobId ?? undefined,
 		metricType: "throughput",
 		metricName: "assets_per_second",
 		value: assetsPerSecond,
-		metadata,
+		metadata: metadata ?? undefined,
 	});
 }
 
@@ -108,11 +108,11 @@ export async function recordErrorRate(
 ): Promise<void> {
 	await recordMetric({
 		shopId,
-		syncJobId,
+		syncJobId: syncJobId ?? undefined,
 		metricType: "error_rate",
 		metricName: "error_rate_percent",
 		value: errorRatePercent,
-		metadata,
+		metadata: metadata ?? undefined,
 	});
 }
 
@@ -126,11 +126,11 @@ export async function recordRateLimitHit(
 ): Promise<void> {
 	await recordMetric({
 		shopId,
-		syncJobId,
+		syncJobId: syncJobId ?? undefined,
 		metricType: "rate_limit_hit",
 		metricName: "rate_limit_hits",
 		value: 1,
-		metadata,
+		metadata: metadata ?? undefined,
 	});
 }
 

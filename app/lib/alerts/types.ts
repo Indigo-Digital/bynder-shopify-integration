@@ -2,7 +2,7 @@
  * Alert type definitions
  */
 
-export type AlertSeverity = "info" | "warning" | "error";
+export type AlertSeverity = "info" | "warning" | "critical";
 
 export interface Alert {
 	id: string;

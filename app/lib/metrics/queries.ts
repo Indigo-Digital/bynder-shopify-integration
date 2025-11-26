@@ -101,27 +101,44 @@ export async function getMetricsSummary(
 	// Calculate averages
 	const averageSyncDuration =
 		durationMetrics.length > 0
-			? durationMetrics.reduce((sum, m) => sum + m.value, 0) /
-				durationMetrics.length
+			? durationMetrics.reduce(
+					(sum: number, m: { value: number }) => sum + m.value,
+					0
+				) / durationMetrics.length
 			: 0;
 
 	const averageThroughput =
 		throughputMetrics.length > 0
-			? throughputMetrics.reduce((sum, m) => sum + m.value, 0) /
-				throughputMetrics.length
+			? throughputMetrics.reduce(
+					(sum: number, m: { value: number }) => sum + m.value,
+					0
+				) / throughputMetrics.length
 			: 0;
 
-	const totalApiCalls = apiCallMetrics.reduce((sum, m) => sum + m.value, 0);
+	const totalApiCalls = apiCallMetrics.reduce(
+		(sum: number, m: { value: number }) => sum + m.value,
+		0
+	);
 
 	// Calculate error rate trend (difference between last 2 error rates)
 	let errorRateTrend = 0;
 	if (errorRateMetrics.length >= 2) {
-		errorRateTrend = errorRateMetrics[0].value - errorRateMetrics[1].value;
+		const first = errorRateMetrics[0];
+		const second = errorRateMetrics[1];
+		if (first && second) {
+			errorRateTrend = first.value - second.value;
+		}
 	} else if (errorRateMetrics.length === 1) {
-		errorRateTrend = errorRateMetrics[0].value;
+		const first = errorRateMetrics[0];
+		if (first) {
+			errorRateTrend = first.value;
+		}
 	}
 
-	const rateLimitHits = rateLimitMetrics.reduce((sum, m) => sum + m.value, 0);
+	const rateLimitHits = rateLimitMetrics.reduce(
+		(sum: number, m: { value: number }) => sum + m.value,
+		0
+	);
 
 	return {
 		averageSyncDuration: Math.round(averageSyncDuration * 10) / 10,
@@ -156,14 +173,16 @@ export async function getJobMetrics(
 	}
 
 	const durationMetric = metrics.find(
-		(m) => m.metricName === "sync_duration_seconds"
+		(m: { metricName: string }) => m.metricName === "sync_duration_seconds"
 	);
 	const throughputMetric = metrics.find(
-		(m) => m.metricName === "assets_per_second"
+		(m: { metricName: string }) => m.metricName === "assets_per_second"
 	);
-	const apiCallMetrics = metrics.filter((m) => m.metricType === "api_call");
+	const apiCallMetrics = metrics.filter(
+		(m: { metricType: string }) => m.metricType === "api_call"
+	);
 	const errorRateMetric = metrics.find(
-		(m) => m.metricName === "error_rate_percent"
+		(m: { metricName: string }) => m.metricName === "error_rate_percent"
 	);
 
 	return {

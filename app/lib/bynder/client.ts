@@ -303,13 +303,18 @@ export class BynderClient {
 
 		while (hasMore) {
 			const { shopId, syncJobId, ...listParams } = params;
-			const response = await this.getMediaList({
+			const listCallParams: Parameters<BynderClient["getMediaList"]>[0] = {
 				...listParams,
 				page,
 				limit,
-				shopId,
-				syncJobId,
-			});
+			};
+			if (shopId) {
+				listCallParams.shopId = shopId;
+			}
+			if (syncJobId) {
+				listCallParams.syncJobId = syncJobId;
+			}
+			const response = await this.getMediaList(listCallParams);
 
 			if (response && typeof response === "object") {
 				// Check if response has media array

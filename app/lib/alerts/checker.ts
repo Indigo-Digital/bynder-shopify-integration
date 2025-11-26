@@ -48,7 +48,7 @@ export async function checkSyncJobAlerts(
 	if (job.status === "failed") {
 		alerts.push({
 			hasAlert: true,
-			severity: "error",
+			severity: "critical",
 			message: "Sync job failed. Please check the error details.",
 		});
 		return alerts;
@@ -67,13 +67,13 @@ export async function checkSyncJobAlerts(
 	});
 
 	const errorRateMetric = metrics.find(
-		(m) => m.metricName === "error_rate_percent"
+		(m: { metricName: string }) => m.metricName === "error_rate_percent"
 	);
 	const throughputMetric = metrics.find(
-		(m) => m.metricName === "assets_per_second"
+		(m: { metricName: string }) => m.metricName === "assets_per_second"
 	);
 	const rateLimitMetrics = metrics.filter(
-		(m) => m.metricName === "rate_limit_hits"
+		(m: { metricName: string }) => m.metricName === "rate_limit_hits"
 	);
 
 	// Check error rate
@@ -99,7 +99,7 @@ export async function checkSyncJobAlerts(
 
 	// Check rate limit hits
 	const totalRateLimitHits = rateLimitMetrics.reduce(
-		(sum, m) => sum + m.value,
+		(sum: number, m: { value: number }) => sum + m.value,
 		0
 	);
 	if (totalRateLimitHits >= cond.rateLimitHitThreshold) {

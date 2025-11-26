@@ -31,9 +31,9 @@ export interface MetricMetadata {
 
 export interface MetricRecord {
 	shopId: string;
-	syncJobId?: string;
+	syncJobId?: string | undefined;
 	metricType: MetricType;
 	metricName: MetricName;
 	value: number;
-	metadata?: MetricMetadata;
+	metadata?: MetricMetadata | undefined;
 }

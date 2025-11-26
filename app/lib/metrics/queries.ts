@@ -20,8 +20,8 @@ export async function getMetricsSummary(
 	lastNJobs = 10
 ): Promise<MetricsSummary> {
 	// Safety check: ensure prisma is initialized
-	if (!prisma || !prisma.syncJob) {
-		console.error("Prisma client not initialized in getMetricsSummary");
+	if (!prisma) {
+		console.error("Prisma client is undefined in getMetricsSummary");
 		return {
 			averageSyncDuration: 0,
 			averageThroughput: 0,
@@ -32,15 +32,37 @@ export async function getMetricsSummary(
 	}
 
 	// Get recent completed jobs
-	const recentJobs = await prisma.syncJob.findMany({
-		where: {
-			shopId,
-			status: "completed",
-		},
-		orderBy: { completedAt: "desc" },
-		take: lastNJobs,
-		select: { id: true },
-	});
+	let recentJobs: Array<{ id: string }> = [];
+	try {
+		if (!prisma.syncJob) {
+			console.error("prisma.syncJob is undefined in getMetricsSummary");
+			return {
+				averageSyncDuration: 0,
+				averageThroughput: 0,
+				totalApiCalls: 0,
+				errorRateTrend: 0,
+				rateLimitHits: 0,
+			};
+		}
+		recentJobs = await prisma.syncJob.findMany({
+			where: {
+				shopId,
+				status: "completed",
+			},
+			orderBy: { completedAt: "desc" },
+			take: lastNJobs,
+			select: { id: true },
+		});
+	} catch (error) {
+		console.error("Error fetching recent jobs in getMetricsSummary:", error);
+		return {
+			averageSyncDuration: 0,
+			averageThroughput: 0,
+			totalApiCalls: 0,
+			errorRateTrend: 0,
+			rateLimitHits: 0,
+		};
+	}
 
 	const jobIds = recentJobs.map((job) => job.id);
 
@@ -55,60 +77,97 @@ export async function getMetricsSummary(
 	}
 
 	// Get sync duration metrics
-	const durationMetrics = await prisma.syncMetrics.findMany({
-		where: {
-			shopId,
-			syncJobId: { in: jobIds },
-			metricType: "sync_duration",
-			metricName: "sync_duration_seconds",
-		},
-		select: { value: true },
-	});
+	let durationMetrics: Array<{ value: number }> = [];
+	try {
+		if (!prisma.syncMetrics) {
+			console.error("prisma.syncMetrics is undefined in getMetricsSummary");
+		} else {
+			durationMetrics = await prisma.syncMetrics.findMany({
+				where: {
+					shopId,
+					syncJobId: { in: jobIds },
+					metricType: "sync_duration",
+					metricName: "sync_duration_seconds",
+				},
+				select: { value: true },
+			});
+		}
+	} catch (error) {
+		console.error("Error fetching duration metrics:", error);
+	}
 
 	// Get throughput metrics
-	const throughputMetrics = await prisma.syncMetrics.findMany({
-		where: {
-			shopId,
-			syncJobId: { in: jobIds },
-			metricType: "throughput",
-			metricName: "assets_per_second",
-		},
-		select: { value: true },
-	});
+	let throughputMetrics: Array<{ value: number }> = [];
+	try {
+		if (prisma.syncMetrics) {
+			throughputMetrics = await prisma.syncMetrics.findMany({
+				where: {
+					shopId,
+					syncJobId: { in: jobIds },
+					metricType: "throughput",
+					metricName: "assets_per_second",
+				},
+				select: { value: true },
+			});
+		}
+	} catch (error) {
+		console.error("Error fetching throughput metrics:", error);
+	}
 
 	// Get API call counts
-	const apiCallMetrics = await prisma.syncMetrics.findMany({
-		where: {
-			shopId,
-			syncJobId: { in: jobIds },
-			metricType: "api_call",
-		},
-		select: { value: true },
-	});
+	let apiCallMetrics: Array<{ value: number }> = [];
+	try {
+		if (prisma.syncMetrics) {
+			apiCallMetrics = await prisma.syncMetrics.findMany({
+				where: {
+					shopId,
+					syncJobId: { in: jobIds },
+					metricType: "api_call",
+				},
+				select: { value: true },
+			});
+		}
+	} catch (error) {
+		console.error("Error fetching API call metrics:", error);
+	}
 
 	// Get error rate metrics
-	const errorRateMetrics = await prisma.syncMetrics.findMany({
-		where: {
-			shopId,
-			syncJobId: { in: jobIds },
-			metricType: "error_rate",
-			metricName: "error_rate_percent",
-		},
-		orderBy: { recordedAt: "desc" },
-		take: 2,
-		select: { value: true },
-	});
+	let errorRateMetrics: Array<{ value: number }> = [];
+	try {
+		if (prisma.syncMetrics) {
+			errorRateMetrics = await prisma.syncMetrics.findMany({
+				where: {
+					shopId,
+					syncJobId: { in: jobIds },
+					metricType: "error_rate",
+					metricName: "error_rate_percent",
+				},
+				orderBy: { recordedAt: "desc" },
+				take: 2,
+				select: { value: true },
+			});
+		}
+	} catch (error) {
+		console.error("Error fetching error rate metrics:", error);
+	}
 
 	// Get rate limit hits
-	const rateLimitMetrics = await prisma.syncMetrics.findMany({
-		where: {
-			shopId,
-			syncJobId: { in: jobIds },
-			metricType: "rate_limit_hit",
-			metricName: "rate_limit_hits",
-		},
-		select: { value: true },
-	});
+	let rateLimitMetrics: Array<{ value: number }> = [];
+	try {
+		if (prisma.syncMetrics) {
+			rateLimitMetrics = await prisma.syncMetrics.findMany({
+				where: {
+					shopId,
+					syncJobId: { in: jobIds },
+					metricType: "rate_limit_hit",
+					metricName: "rate_limit_hits",
+				},
+				select: { value: true },
+			});
+		}
+	} catch (error) {
+		console.error("Error fetching rate limit metrics:", error);
+	}
 
 	// Calculate averages
 	const averageSyncDuration =
@@ -179,12 +238,26 @@ export async function getJobMetrics(
 		return null;
 	}
 
-	const metrics = await prisma.syncMetrics.findMany({
-		where: {
-			shopId,
-			syncJobId,
-		},
-	});
+	let metrics: Array<{
+		metricName: string;
+		metricType: string;
+		value: number;
+	}> = [];
+	try {
+		if (!prisma.syncMetrics) {
+			console.error("prisma.syncMetrics is undefined in getJobMetrics");
+			return null;
+		}
+		metrics = await prisma.syncMetrics.findMany({
+			where: {
+				shopId,
+				syncJobId,
+			},
+		});
+	} catch (error) {
+		console.error("Error fetching job metrics:", error);
+		return null;
+	}
 
 	if (metrics.length === 0) {
 		return null;

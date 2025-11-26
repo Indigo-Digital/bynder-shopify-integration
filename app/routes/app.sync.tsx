@@ -323,59 +323,71 @@ export default function SyncDashboard() {
 						</h3>
 						<div style={{ marginTop: "0.5rem" }}>
 							<s-stack direction="inline" gap="base">
-							<s-box padding="base" borderWidth="base" borderRadius="base">
-								<s-text>Avg Sync Duration</s-text>
-								<s-heading>
-									{metricsSummary.averageSyncDuration > 0
-										? `${metricsSummary.averageSyncDuration}s`
-										: "N/A"}
-								</s-heading>
-							</s-box>
-							<s-box padding="base" borderWidth="base" borderRadius="base">
-								<s-text>Avg Throughput</s-text>
-								<s-heading>
-									{metricsSummary.averageThroughput > 0
-										? `${metricsSummary.averageThroughput.toFixed(1)} assets/sec`
-										: "N/A"}
-								</s-heading>
-							</s-box>
-							<s-box padding="base" borderWidth="base" borderRadius="base">
-								<s-text>Total API Calls</s-text>
-								<s-heading>
-									{metricsSummary.totalApiCalls > 0
-										? metricsSummary.totalApiCalls.toLocaleString()
-										: "N/A"}
-								</s-heading>
-							</s-box>
-							<s-box padding="base" borderWidth="base" borderRadius="base">
-								<s-text>Error Rate Trend</s-text>
-								<div
-									style={{
-										color:
-											metricsSummary.errorRateTrend > 0
-												? "#d72c0d"
-												: metricsSummary.errorRateTrend < 0
-													? "#008060"
-													: "#666",
-										fontSize: "1.5rem",
-										fontWeight: "bold",
-									}}
-								>
-									{metricsSummary.errorRateTrend !== 0
-										? `${metricsSummary.errorRateTrend > 0 ? "+" : ""}${metricsSummary.errorRateTrend.toFixed(1)}%`
-										: "0%"}
-								</div>
-							</s-box>
-							{metricsSummary.rateLimitHits > 0 && (
 								<s-box padding="base" borderWidth="base" borderRadius="base">
-									<div style={{ border: "1px solid #d72c0d", padding: "0.5rem", borderRadius: "0.25rem" }}>
-										<s-text>Rate Limit Hits</s-text>
-										<div style={{ color: "#d72c0d", fontSize: "1.5rem", fontWeight: "bold" }}>
-											{metricsSummary.rateLimitHits}
-										</div>
+									<s-text>Avg Sync Duration</s-text>
+									<s-heading>
+										{metricsSummary.averageSyncDuration > 0
+											? `${metricsSummary.averageSyncDuration}s`
+											: "N/A"}
+									</s-heading>
+								</s-box>
+								<s-box padding="base" borderWidth="base" borderRadius="base">
+									<s-text>Avg Throughput</s-text>
+									<s-heading>
+										{metricsSummary.averageThroughput > 0
+											? `${metricsSummary.averageThroughput.toFixed(1)} assets/sec`
+											: "N/A"}
+									</s-heading>
+								</s-box>
+								<s-box padding="base" borderWidth="base" borderRadius="base">
+									<s-text>Total API Calls</s-text>
+									<s-heading>
+										{metricsSummary.totalApiCalls > 0
+											? metricsSummary.totalApiCalls.toLocaleString()
+											: "N/A"}
+									</s-heading>
+								</s-box>
+								<s-box padding="base" borderWidth="base" borderRadius="base">
+									<s-text>Error Rate Trend</s-text>
+									<div
+										style={{
+											color:
+												metricsSummary.errorRateTrend > 0
+													? "#d72c0d"
+													: metricsSummary.errorRateTrend < 0
+														? "#008060"
+														: "#666",
+											fontSize: "1.5rem",
+											fontWeight: "bold",
+										}}
+									>
+										{metricsSummary.errorRateTrend !== 0
+											? `${metricsSummary.errorRateTrend > 0 ? "+" : ""}${metricsSummary.errorRateTrend.toFixed(1)}%`
+											: "0%"}
 									</div>
 								</s-box>
-							)}
+								{metricsSummary.rateLimitHits > 0 && (
+									<s-box padding="base" borderWidth="base" borderRadius="base">
+										<div
+											style={{
+												border: "1px solid #d72c0d",
+												padding: "0.5rem",
+												borderRadius: "0.25rem",
+											}}
+										>
+											<s-text>Rate Limit Hits</s-text>
+											<div
+												style={{
+													color: "#d72c0d",
+													fontSize: "1.5rem",
+													fontWeight: "bold",
+												}}
+											>
+												{metricsSummary.rateLimitHits}
+											</div>
+										</div>
+									</s-box>
+								)}
 							</s-stack>
 						</div>
 					</div>

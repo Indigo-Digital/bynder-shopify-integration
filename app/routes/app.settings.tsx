@@ -72,8 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	});
 
 	// Get webhook subscription status
-	const webhookSubscription =
-		shopConfig?.webhookSubscriptions?.[0] || null;
+	const webhookSubscription = shopConfig?.webhookSubscriptions?.[0] || null;
 
 	return {
 		shop,

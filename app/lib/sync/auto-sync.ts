@@ -2,6 +2,8 @@ import prisma from "../../db.server.js";
 import type { BynderClient } from "../bynder/client.js";
 import { uploadBynderAsset } from "../shopify/files.js";
 import type { AdminApi } from "../types.js";
+import { categorizeErrors } from "./error-categorization.js";
+import { retryFailedAssets } from "./retry-failed-assets.js";
 
 interface SyncOptions {
 	shopId: string;
@@ -83,7 +85,7 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		return job?.status === "cancelled";
 	};
 
-	const errors: Array<{ assetId: string; error: string }> = [];
+	let errors: Array<{ assetId: string; error: string }> = [];
 	let created = 0;
 	let updated = 0;
 
@@ -263,6 +265,64 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 				updated,
 				errors,
 			};
+		}
+
+		// Automatic retry for transient errors (if enabled and errors exist)
+		if (errors.length > 0) {
+			const categorized = categorizeErrors(errors);
+			if (categorized.stats.transient > 0) {
+				console.log(
+					`[Sync Job ${syncJob.id}] Found ${categorized.stats.transient} transient errors, attempting automatic retry...`
+				);
+				try {
+					// Wait 5 seconds before retrying (exponential backoff: first retry)
+					await new Promise((resolve) => setTimeout(resolve, 5000));
+
+					const retryResult = await retryFailedAssets({
+						shopId,
+						admin,
+						bynderClient,
+						jobId: syncJob.id,
+						onlyTransient: true, // Only retry transient errors automatically
+					});
+
+					console.log(
+						`[Sync Job ${syncJob.id}] Automatic retry completed: ${retryResult.successful} successful, ${retryResult.failed} failed`
+					);
+
+					// Update error counts: remove successfully retried transient errors
+					// Keep permanent errors and failed retries
+					const successfulRetries = retryResult.results
+						.filter((r) => r.success)
+						.map((r) => r.assetId);
+					const remainingErrors = errors.filter(
+						(err) => !successfulRetries.includes(err.assetId)
+					);
+
+					// Update created/updated counts if retries were successful
+					if (retryResult.successful > 0) {
+						const retryCreated = retryResult.results.filter(
+							(r) => r.success && r.created
+						).length;
+						const retryUpdated = retryResult.results.filter(
+							(r) => r.success && r.updated
+						).length;
+						created += retryCreated;
+						updated += retryUpdated;
+					}
+
+					// Update errors array with remaining errors
+					errors = remainingErrors;
+				} catch (retryError) {
+					console.error(
+						`[Sync Job ${syncJob.id}] Automatic retry failed:`,
+						retryError instanceof Error
+							? retryError.message
+							: String(retryError)
+					);
+					// Continue with original errors if retry fails
+				}
+			}
 		}
 
 		// Update sync job with results

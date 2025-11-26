@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import prisma from "../db.server.js";
+import { categorizeErrors } from "../lib/sync/error-categorization.js";
 import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -46,11 +47,13 @@ export default function SyncDashboard() {
 	const { shopConfig, syncJobs, syncedAssetsCount } =
 		useLoaderData<typeof loader>();
 	const fetcher = useFetcher();
+	const retryFetcher = useFetcher();
 	const revalidator = useRevalidator();
 
 	// All state hooks must be declared before any useEffect hooks
 	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
 	const [currentTime, setCurrentTime] = useState(new Date());
+	const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
 
 	const handleSync = () => {
 		fetcher.submit({}, { method: "POST", action: "/api/sync" });
@@ -68,6 +71,14 @@ export default function SyncDashboard() {
 		fetcher.submit({ jobId }, { method: "POST", action: "/api/sync/cancel" });
 	};
 
+	const handleRetryFailedAssets = (jobId: string, onlyTransient = false) => {
+		setRetryingJobId(jobId);
+		retryFetcher.submit(
+			{ jobId, onlyTransient: onlyTransient.toString() },
+			{ method: "POST", action: "/api/sync/retry" }
+		);
+	};
+
 	// Reload data when sync or cancel completes
 	useEffect(() => {
 		if (fetcher.state === "idle" && fetcher.data) {
@@ -78,6 +89,18 @@ export default function SyncDashboard() {
 			return () => clearTimeout(timer);
 		}
 	}, [fetcher.state, fetcher.data, revalidator]);
+
+	// Reload data when retry completes
+	useEffect(() => {
+		if (retryFetcher.state === "idle" && retryFetcher.data) {
+			setRetryingJobId(null);
+			// Wait a bit, then reload
+			const timer = setTimeout(() => {
+				revalidator.revalidate();
+			}, 500);
+			return () => clearTimeout(timer);
+		}
+	}, [retryFetcher.state, retryFetcher.data, revalidator]);
 
 	// Poll for running sync jobs - only when there's a running job
 	// Use useMemo to stabilize the check and prevent unnecessary effect re-runs
@@ -237,6 +260,26 @@ export default function SyncDashboard() {
 						: "Unknown error"}
 				</s-banner>
 			)}
+
+			{/* Retry Success/Error Notifications */}
+			{retryFetcher.data &&
+				"success" in retryFetcher.data &&
+				retryFetcher.data.success && (
+					<s-banner tone="success">
+						{retryFetcher.data.message ||
+							`Retry completed: ${retryFetcher.data.successful || 0} successful, ${retryFetcher.data.failed || 0} failed`}
+					</s-banner>
+				)}
+			{retryFetcher.data &&
+				"error" in retryFetcher.data &&
+				retryFetcher.data.error && (
+					<s-banner tone="critical">
+						Retry failed:{" "}
+						{typeof retryFetcher.data.error === "string"
+							? retryFetcher.data.error
+							: "Unknown error"}
+					</s-banner>
+				)}
 
 			<s-button
 				slot="primary-action"
@@ -554,38 +597,78 @@ export default function SyncDashboard() {
 														return <span style={{ color: "#999" }}>-</span>;
 													}
 
-													// Calculate error count - prefer JSON errors, fallback to error field
+													// Categorize errors
+													const categorized = categorizeErrors(errorList);
 													const errorCount =
 														errorList.length || (job.error ? 1 : 0);
 													const isExpanded = expandedErrors.has(job.id);
 
 													return (
 														<div>
-															<button
-																type="button"
-																onClick={() => {
-																	const newExpanded = new Set(expandedErrors);
-																	if (isExpanded) {
-																		newExpanded.delete(job.id);
-																	} else {
-																		newExpanded.add(job.id);
-																	}
-																	setExpandedErrors(newExpanded);
-																}}
+															<div
 																style={{
-																	background: "none",
-																	border: "none",
-																	color: "#721c24",
-																	cursor: "pointer",
-																	padding: "0.25rem 0.5rem",
-																	fontSize: "0.875rem",
-																	fontWeight: "600",
-																	textDecoration: "underline",
+																	display: "flex",
+																	alignItems: "center",
+																	gap: "0.5rem",
+																	marginBottom: "0.25rem",
 																}}
 															>
-																{errorCount} error{errorCount !== 1 ? "s" : ""}
-																{isExpanded ? " ▼" : " ▶"}
-															</button>
+																<button
+																	type="button"
+																	onClick={() => {
+																		const newExpanded = new Set(expandedErrors);
+																		if (isExpanded) {
+																			newExpanded.delete(job.id);
+																		} else {
+																			newExpanded.add(job.id);
+																		}
+																		setExpandedErrors(newExpanded);
+																	}}
+																	style={{
+																		background: "none",
+																		border: "none",
+																		color: "#721c24",
+																		cursor: "pointer",
+																		padding: "0.25rem 0.5rem",
+																		fontSize: "0.875rem",
+																		fontWeight: "600",
+																		textDecoration: "underline",
+																	}}
+																>
+																	{errorCount} error
+																	{errorCount !== 1 ? "s" : ""}
+																	{isExpanded ? " ▼" : " ▶"}
+																</button>
+																{/* Error category badges */}
+																{categorized.stats.transient > 0 && (
+																	<span
+																		style={{
+																			padding: "0.125rem 0.375rem",
+																			borderRadius: "4px",
+																			fontSize: "0.75rem",
+																			fontWeight: "600",
+																			backgroundColor: "#fff3cd",
+																			color: "#856404",
+																		}}
+																	>
+																		{categorized.stats.transient} Transient
+																	</span>
+																)}
+																{categorized.stats.permanent > 0 && (
+																	<span
+																		style={{
+																			padding: "0.125rem 0.375rem",
+																			borderRadius: "4px",
+																			fontSize: "0.75rem",
+																			fontWeight: "600",
+																			backgroundColor: "#f8d7da",
+																			color: "#721c24",
+																		}}
+																	>
+																		{categorized.stats.permanent} Permanent
+																	</span>
+																)}
+															</div>
 															{isExpanded && (
 																<div
 																	style={{
@@ -606,19 +689,57 @@ export default function SyncDashboard() {
 																					paddingLeft: "1.5rem",
 																				}}
 																			>
-																				{errorList.map((err) => (
-																					<li
-																						key={err.assetId}
-																						style={{
-																							marginBottom: "0.5rem",
-																						}}
-																					>
-																						<strong>
-																							Asset {err.assetId}:
-																						</strong>{" "}
-																						{err.error}
-																					</li>
-																				))}
+																				{errorList.map((err) => {
+																					const errCategorized =
+																						categorizeErrors([err]);
+																					const isTransient =
+																						errCategorized.transient.length > 0;
+																					const isPermanent =
+																						errCategorized.permanent.length > 0;
+																					return (
+																						<li
+																							key={err.assetId}
+																							style={{
+																								marginBottom: "0.5rem",
+																							}}
+																						>
+																							<strong>
+																								Asset {err.assetId}:
+																							</strong>{" "}
+																							{err.error}
+																							{isTransient && (
+																								<span
+																									style={{
+																										marginLeft: "0.5rem",
+																										padding:
+																											"0.125rem 0.375rem",
+																										borderRadius: "4px",
+																										fontSize: "0.75rem",
+																										backgroundColor: "#fff3cd",
+																										color: "#856404",
+																									}}
+																								>
+																									Transient
+																								</span>
+																							)}
+																							{isPermanent && (
+																								<span
+																									style={{
+																										marginLeft: "0.5rem",
+																										padding:
+																											"0.125rem 0.375rem",
+																										borderRadius: "4px",
+																										fontSize: "0.75rem",
+																										backgroundColor: "#f8d7da",
+																										color: "#721c24",
+																									}}
+																								>
+																									Permanent
+																								</span>
+																							)}
+																						</li>
+																					);
+																				})}
 																			</ul>
 																		</div>
 																	) : job.error ? (
@@ -659,32 +780,143 @@ export default function SyncDashboard() {
 												})()}
 											</td>
 											<td style={{ padding: "0.75rem", textAlign: "center" }}>
-												{job.status === "running" ||
-												job.status === "pending" ? (
-													<button
-														type="button"
-														onClick={() => handleCancelJob(job.id)}
-														disabled={fetcher.state !== "idle"}
-														style={{
-															padding: "0.5rem 1rem",
-															backgroundColor: "#dc3545",
-															color: "white",
-															border: "none",
-															borderRadius: "4px",
-															cursor:
-																fetcher.state !== "idle"
-																	? "not-allowed"
-																	: "pointer",
-															fontSize: "0.875rem",
-															fontWeight: "600",
-															opacity: fetcher.state !== "idle" ? 0.6 : 1,
-														}}
-													>
-														Cancel
-													</button>
-												) : (
-													<span style={{ color: "#999" }}>-</span>
-												)}
+												<div
+													style={{
+														display: "flex",
+														flexDirection: "column",
+														gap: "0.5rem",
+														alignItems: "center",
+													}}
+												>
+													{job.status === "running" ||
+													job.status === "pending" ? (
+														<button
+															type="button"
+															onClick={() => handleCancelJob(job.id)}
+															disabled={fetcher.state !== "idle"}
+															style={{
+																padding: "0.5rem 1rem",
+																backgroundColor: "#dc3545",
+																color: "white",
+																border: "none",
+																borderRadius: "4px",
+																cursor:
+																	fetcher.state !== "idle"
+																		? "not-allowed"
+																		: "pointer",
+																fontSize: "0.875rem",
+																fontWeight: "600",
+																opacity: fetcher.state !== "idle" ? 0.6 : 1,
+															}}
+														>
+															Cancel
+														</button>
+													) : (job.errors || job.error) &&
+														(job.status === "completed" ||
+															job.status === "failed") ? (
+														<>
+															<button
+																type="button"
+																onClick={() =>
+																	handleRetryFailedAssets(job.id, false)
+																}
+																disabled={
+																	retryFetcher.state !== "idle" ||
+																	retryingJobId === job.id
+																}
+																style={{
+																	padding: "0.5rem 1rem",
+																	backgroundColor: "#28a745",
+																	color: "white",
+																	border: "none",
+																	borderRadius: "4px",
+																	cursor:
+																		retryFetcher.state !== "idle" ||
+																		retryingJobId === job.id
+																			? "not-allowed"
+																			: "pointer",
+																	fontSize: "0.875rem",
+																	fontWeight: "600",
+																	opacity:
+																		retryFetcher.state !== "idle" ||
+																		retryingJobId === job.id
+																			? 0.6
+																			: 1,
+																}}
+															>
+																{retryingJobId === job.id
+																	? "Retrying..."
+																	: "Retry All"}
+															</button>
+															{(() => {
+																// Parse errors to check if there are transient errors
+																let errorList: Array<{
+																	assetId: string;
+																	error: string;
+																}> = [];
+																if (job.errors) {
+																	try {
+																		const parsed = JSON.parse(job.errors);
+																		if (Array.isArray(parsed)) {
+																			errorList = parsed;
+																		} else if (
+																			typeof parsed === "object" &&
+																			parsed !== null
+																		) {
+																			errorList = Object.entries(parsed).map(
+																				([key, value]) => ({
+																					assetId: key,
+																					error: String(value),
+																				})
+																			);
+																		}
+																	} catch (_e) {
+																		// Ignore parse errors
+																	}
+																}
+																const categorized = categorizeErrors(errorList);
+																if (categorized.stats.transient > 0) {
+																	return (
+																		<button
+																			type="button"
+																			onClick={() =>
+																				handleRetryFailedAssets(job.id, true)
+																			}
+																			disabled={
+																				retryFetcher.state !== "idle" ||
+																				retryingJobId === job.id
+																			}
+																			style={{
+																				padding: "0.5rem 1rem",
+																				backgroundColor: "#ffc107",
+																				color: "#000",
+																				border: "none",
+																				borderRadius: "4px",
+																				cursor:
+																					retryFetcher.state !== "idle" ||
+																					retryingJobId === job.id
+																						? "not-allowed"
+																						: "pointer",
+																				fontSize: "0.875rem",
+																				fontWeight: "600",
+																				opacity:
+																					retryFetcher.state !== "idle" ||
+																					retryingJobId === job.id
+																						? 0.6
+																						: 1,
+																			}}
+																		>
+																			Retry Transient
+																		</button>
+																	);
+																}
+																return null;
+															})()}
+														</>
+													) : (
+														<span style={{ color: "#999" }}>-</span>
+													)}
+												</div>
 											</td>
 										</tr>
 									)

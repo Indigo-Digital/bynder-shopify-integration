@@ -705,68 +705,16 @@ export async function uploadBynderAsset(
 					validateStatus: () => true, // Don't throw on error status codes
 				};
 
-				// CRITICAL: For GCS signed URLs with X-Goog-SignedHeaders=host,
-				// try passing FormData stream directly to fetch and let it set Content-Type automatically
-				// This matches how curl -F works - curl automatically sets Content-Type
-				// Since only 'host' is signed, we should NOT manually set Content-Type header
-				// Try passing FormData directly first (works for both native and form-data package)
-				if (formData) {
-					console.error(
-						`[Upload Debug] Attempting to pass FormData directly to fetch (letting fetch set Content-Type automatically)`
-					);
-					console.error(
-						`[Upload Debug] FormData entries: ${stagedTarget.parameters.length} params + 1 file`
-					);
-					console.error(
-						`[Upload Debug] Sending POST request to: ${stagedTarget.url}`
-					);
-					try {
-						const fetchResponse = await fetch(stagedTarget.url, {
-							method: "POST",
-							body: formData as unknown as BodyInit,
-							// DO NOT set Content-Type header - let fetch set it automatically
-							// This matches curl -F behavior and GCS signature expectations
-							// Since X-Goog-SignedHeaders=host, only host header is signed
-						});
-						const responseData = await fetchResponse.text();
-						console.error(
-							`[Upload Debug] Response status: ${fetchResponse.status} ${fetchResponse.statusText}`
-						);
-						console.error(
-							`[Upload Debug] Response headers: ${JSON.stringify(Object.fromEntries(fetchResponse.headers.entries()), null, 2)}`
-						);
-						if (responseData) {
-							const responsePreview =
-								responseData.length > 500
-									? `${responseData.substring(0, 500)}...`
-									: responseData;
-							console.error(`[Upload Debug] Response body: ${responsePreview}`);
-						}
-						uploadResponse = {
-							status: fetchResponse.status,
-							statusText: fetchResponse.statusText,
-							data: responseData,
-						};
-					} catch (formDataError) {
-						console.error(
-							`[Upload Debug] Failed to use FormData directly: ${formDataError}`
-						);
-						console.error(
-							`[Upload Debug] Falling back to Buffer + headers approach`
-						);
-						// Fall through to Buffer + headers approach
-					}
-				}
-
-				// Fallback: Use Buffer + headers from form-data polyfill
-				// This is needed when FormData stream doesn't work with fetch
+				// CRITICAL: For GCS signed URLs, we MUST use Buffer + headers from form-data polyfill
+				// The boundary in Content-Type MUST exactly match the body format
+				// We cannot pass FormData directly to fetch because fetch might generate a different boundary
+				// Always use getBuffer() + getHeaders() to ensure boundary consistency
 				if (
-					!uploadResponse &&
 					uploadBody instanceof Buffer &&
 					Object.keys(uploadHeaders).length > 0
 				) {
 					console.error(
-						`[Upload Debug] Using form-data polyfill Buffer + headers (fallback)`
+						`[Upload Debug] Using form-data polyfill Buffer + headers (required for GCS signature)`
 					);
 					console.error(
 						`[Upload Debug] Content-Type header from getHeaders(): ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "NOT SET"}`
@@ -779,31 +727,17 @@ export async function uploadBynderAsset(
 					// Convert Buffer to Uint8Array for fetch API compatibility
 					const bodyArray = new Uint8Array(uploadBody);
 
-					// CRITICAL: For GCS signed URLs with X-Goog-SignedHeaders=host,
-					// we should NOT send Content-Type header manually
-					// Only the 'host' header is signed, so sending Content-Type might break signature
+					// CRITICAL: Always include Content-Type header from getHeaders()
+					// The boundary in Content-Type MUST match the boundary in the Buffer body
+					// Even though only 'host' is signed (X-Goog-SignedHeaders=host), Content-Type is required
+					// for multipart/form-data to work correctly
 					const fetchHeaders: HeadersInit = {};
-
-					// Check if X-Goog-SignedHeaders=host in URL query params
-					const urlObj = new URL(stagedTarget.url);
-					const signedHeaders = urlObj.searchParams.get("X-Goog-SignedHeaders");
-					const shouldOmitContentType = signedHeaders === "host";
-
-					if (shouldOmitContentType) {
-						console.error(
-							`[Upload Debug] X-Goog-SignedHeaders=host detected - NOT setting Content-Type header manually`
-						);
-						console.error(
-							`[Upload Debug] WARNING: Using Buffer without Content-Type - this may fail`
-						);
-						// Don't add Content-Type header - let fetch set it automatically
-						// This matches curl -F behavior
-					} else {
-						// Include Content-Type header if it's part of signed headers
-						for (const [key, value] of Object.entries(uploadHeaders)) {
-							fetchHeaders[key] = value;
-						}
+					for (const [key, value] of Object.entries(uploadHeaders)) {
+						fetchHeaders[key] = value;
 					}
+					console.error(
+						`[Upload Debug] Using Content-Type header from getHeaders() with boundary matching Buffer`
+					);
 
 					// CRITICAL: For GCS signed URLs, DO NOT add Content-Length manually
 					// GCS will calculate it from the body, and adding it manually might break the signature

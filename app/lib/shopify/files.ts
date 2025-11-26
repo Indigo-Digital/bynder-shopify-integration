@@ -604,51 +604,54 @@ export async function uploadBynderAsset(
 			// 6. Payload hash (UNSIGNED-PAYLOAD means hash is not included, but format still matters)
 			try {
 				// Log comprehensive request details before sending
+				// Use console.error() so logs appear in production (console.log() may be filtered)
 				const uploadUrlObj = new URL(stagedTarget.url);
-				console.log(`[Upload Debug] ===== UPLOAD REQUEST DETAILS =====`);
-				console.log(`[Upload Debug] Full URL: ${stagedTarget.url}`);
-				console.log(`[Upload Debug] URL pathname: ${uploadUrlObj.pathname}`);
-				console.log(
+				console.error(`[Upload Debug] ===== UPLOAD REQUEST DETAILS =====`);
+				console.error(`[Upload Debug] Full URL: ${stagedTarget.url}`);
+				console.error(`[Upload Debug] URL pathname: ${uploadUrlObj.pathname}`);
+				console.error(
 					`[Upload Debug] URL query string: ${uploadUrlObj.search || "(none)"}`
 				);
 				if (uploadUrlObj.search) {
-					console.log(
+					console.error(
 						`[Upload Debug] URL query param keys: ${Array.from(uploadUrlObj.searchParams.keys()).join(", ")}`
 					);
 					// Log query param values (truncated)
 					for (const [key, value] of uploadUrlObj.searchParams.entries()) {
 						const valuePreview =
 							value.length > 80 ? `${value.substring(0, 80)}...` : value;
-						console.log(
+						console.error(
 							`[Upload Debug]   Query param "${key}": "${valuePreview}"`
 						);
 					}
 				}
-				console.log(`[Upload Debug] HTTP Method: POST`);
-				console.log(
+				console.error(`[Upload Debug] HTTP Method: POST`);
+				console.error(
 					`[Upload Debug] Request headers count: ${Object.keys(uploadHeaders).length}`
 				);
 				for (const [key, value] of Object.entries(uploadHeaders)) {
 					if (key.toLowerCase() === "content-type") {
-						console.log(`[Upload Debug]   Header "${key}": ${value}`);
+						console.error(`[Upload Debug]   Header "${key}": ${value}`);
 					} else {
 						const valuePreview =
 							value.length > 100 ? `${value.substring(0, 100)}...` : value;
-						console.log(`[Upload Debug]   Header "${key}": "${valuePreview}"`);
+						console.error(
+							`[Upload Debug]   Header "${key}": "${valuePreview}"`
+						);
 					}
 				}
-				console.log(
+				console.error(
 					`[Upload Debug] Body type: ${uploadBody instanceof Buffer ? "Buffer" : "FormData"}`
 				);
 				if (uploadBody instanceof Buffer) {
-					console.log(`[Upload Debug] Body size: ${uploadBody.length} bytes`);
+					console.error(`[Upload Debug] Body size: ${uploadBody.length} bytes`);
 					// Log first 500 bytes of body to verify multipart format
 					const bodyStart = uploadBody.toString(
 						"utf8",
 						0,
 						Math.min(500, uploadBody.length)
 					);
-					console.log(
+					console.error(
 						`[Upload Debug] Body start (first 500 bytes): ${bodyStart}`
 					);
 					// Extract boundary from Content-Type header
@@ -659,10 +662,10 @@ export async function uploadBynderAsset(
 					const boundaryMatch = contentType.match(/boundary=([^;]+)/);
 					if (boundaryMatch?.[1]) {
 						const boundary = boundaryMatch[1].trim();
-						console.log(`[Upload Debug] Content-Type boundary: ${boundary}`);
+						console.error(`[Upload Debug] Content-Type boundary: ${boundary}`);
 						// Verify boundary appears in body
 						if (bodyStart.includes(boundary)) {
-							console.log(
+							console.error(
 								`[Upload Debug] ✓ Boundary found in body (matches Content-Type)`
 							);
 						} else {
@@ -681,10 +684,10 @@ export async function uploadBynderAsset(
 					polyfillFormDataForCount._streams?.length ||
 					polyfillFormDataForCount._length ||
 					0;
-				console.log(
+				console.error(
 					`[Upload Debug] FormData entries count: ${formDataEntryCount} (${stagedTarget.parameters.length} params + 1 file)`
 				);
-				console.log(`[Upload Debug] ====================================`);
+				console.error(`[Upload Debug] ====================================`);
 
 				// CRITICAL: For GCS signed URLs, we might need to NOT set Content-Type manually
 				// and let axios/form-data set it automatically, OR ensure it matches exactly

@@ -32,37 +32,46 @@ export function BynderPicker({
 		setLoading(true);
 		setError(null);
 
+		// Extract portal URL from baseUrl (remove /api suffix if present)
+		// Portal URL should be the base Bynder URL without /api
+		let portalUrl = baseUrl.trim();
+		// Remove trailing slash
+		portalUrl = portalUrl.replace(/\/$/, "");
+		// Remove /api suffix if present
+		portalUrl = portalUrl.replace(/\/api$/, "");
+
 		// Check if script already exists
 		const existingScript = document.querySelector(
-			'script[src*="compactview"]'
+			'script[src*="bynder-compactview"]'
 		) as HTMLScriptElement;
 
 		if (existingScript && window.BynderCompactView) {
 			// Script already loaded, initialize immediately
-			initializeWidget();
+			initializeWidget(portalUrl);
 			return;
 		}
 
-		// Load Bynder UCV script
+		// Load Bynder UCV script from CDN
 		const script = document.createElement("script");
-		script.src = `${baseUrl}/api/v4/compactview/?language=en_US`;
+		script.src =
+			"https://ucv.bynder.com/5.0.5/modules/compactview/bynder-compactview-5-latest.js";
 		script.async = true;
 
 		script.onload = () => {
 			setLoading(false);
-			initializeWidget();
+			initializeWidget(portalUrl);
 		};
 
 		script.onerror = () => {
 			setLoading(false);
 			setError(
-				`Failed to load Bynder picker. Please check your Bynder base URL: ${baseUrl}`
+				`Failed to load Bynder picker. Please check your internet connection and try again.`
 			);
 		};
 
 		document.body.appendChild(script);
 
-		function initializeWidget() {
+		function initializeWidget(portal: string) {
 			// Initialize Bynder Compact View
 			if (window.BynderCompactView && containerRef.current) {
 				try {
@@ -70,6 +79,11 @@ export function BynderPicker({
 						mode,
 						assetTypes,
 						container: containerRef.current,
+						portal: {
+							url: portal,
+							editable: false, // Limit to single portal
+						},
+						language: "en_US",
 						onSuccess: (assets: Array<{ id: string }>) => {
 							if (assets && assets.length > 0 && assets[0]) {
 								onAssetSelect(assets[0].id);
@@ -173,17 +187,35 @@ export function BynderPicker({
 	);
 }
 
-// Extend window type for Bynder Compact View
+// Extend window type for Bynder Compact View v5.x
 declare global {
 	interface Window {
 		BynderCompactView?: {
 			open: (config: {
-				mode: string;
-				assetTypes: string[];
-				container: HTMLElement;
-				onSuccess: (assets: Array<{ id: string }>) => void;
-				onClose: () => void;
-			}) => unknown;
+				mode?: "MultiSelect" | "SingleSelect" | "SingleSelectFile";
+				assetTypes?: string[];
+				container?: HTMLElement;
+				portal?: {
+					url: string;
+					editable?: boolean;
+				};
+				language?: string;
+				onSuccess?: (assets: Array<{ id: string }>) => void;
+				onClose?: () => void;
+				onLogout?: () => void;
+				defaultSearchTerm?: string;
+				theme?: unknown;
+				assetFieldSelection?: string;
+				hideExternalAccess?: boolean;
+				selectedAssets?: string[];
+				assetFilter?: unknown;
+				authentication?: {
+					getAccessToken?: () => string;
+					hideLogout?: boolean;
+				};
+			}) => {
+				close: () => void;
+			};
 		};
 	}
 }

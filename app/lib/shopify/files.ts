@@ -705,19 +705,71 @@ export async function uploadBynderAsset(
 					validateStatus: () => true, // Don't throw on error status codes
 				};
 
-				// CRITICAL: For GCS signed URLs, we MUST use native fetch with the exact Buffer
-				// from getBuffer() and exact headers from getHeaders() to avoid any modifications
-				// that axios or other HTTP clients might make to the request
-				// The Content-Type header with boundary MUST exactly match the body format
+				// CRITICAL: For GCS signed URLs with X-Goog-SignedHeaders=host,
+				// try passing FormData stream directly to fetch and let it set Content-Type automatically
+				// This matches how curl -F works - curl automatically sets Content-Type
+				// Since only 'host' is signed, we should NOT manually set Content-Type header
+				// Try passing FormData directly first (works for both native and form-data package)
+				if (formData) {
+					console.error(
+						`[Upload Debug] Attempting to pass FormData directly to fetch (letting fetch set Content-Type automatically)`
+					);
+					console.error(
+						`[Upload Debug] FormData entries: ${stagedTarget.parameters.length} params + 1 file`
+					);
+					console.error(
+						`[Upload Debug] Sending POST request to: ${stagedTarget.url}`
+					);
+					try {
+						const fetchResponse = await fetch(stagedTarget.url, {
+							method: "POST",
+							body: formData as unknown as BodyInit,
+							// DO NOT set Content-Type header - let fetch set it automatically
+							// This matches curl -F behavior and GCS signature expectations
+							// Since X-Goog-SignedHeaders=host, only host header is signed
+						});
+						const responseData = await fetchResponse.text();
+						console.error(
+							`[Upload Debug] Response status: ${fetchResponse.status} ${fetchResponse.statusText}`
+						);
+						console.error(
+							`[Upload Debug] Response headers: ${JSON.stringify(Object.fromEntries(fetchResponse.headers.entries()), null, 2)}`
+						);
+						if (responseData) {
+							const responsePreview =
+								responseData.length > 500
+									? `${responseData.substring(0, 500)}...`
+									: responseData;
+							console.error(`[Upload Debug] Response body: ${responsePreview}`);
+						}
+						uploadResponse = {
+							status: fetchResponse.status,
+							statusText: fetchResponse.statusText,
+							data: responseData,
+						};
+					} catch (formDataError) {
+						console.error(
+							`[Upload Debug] Failed to use FormData directly: ${formDataError}`
+						);
+						console.error(
+							`[Upload Debug] Falling back to Buffer + headers approach`
+						);
+						// Fall through to Buffer + headers approach
+					}
+				}
+
+				// Fallback: Use Buffer + headers from form-data polyfill
+				// This is needed when FormData stream doesn't work with fetch
 				if (
+					!uploadResponse &&
 					uploadBody instanceof Buffer &&
 					Object.keys(uploadHeaders).length > 0
 				) {
 					console.error(
-						`[Upload Debug] Sending request using native fetch with exact Buffer and headers`
+						`[Upload Debug] Using form-data polyfill Buffer + headers (fallback)`
 					);
 					console.error(
-						`[Upload Debug] Content-Type header: ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "NOT SET - THIS WILL FAIL"}`
+						`[Upload Debug] Content-Type header from getHeaders(): ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "NOT SET"}`
 					);
 					console.error(
 						`[Upload Debug] Body buffer size: ${uploadBody.length} bytes`
@@ -727,27 +779,43 @@ export async function uploadBynderAsset(
 					// Convert Buffer to Uint8Array for fetch API compatibility
 					const bodyArray = new Uint8Array(uploadBody);
 
-					// Ensure headers are properly formatted for fetch
-					// fetch expects HeadersInit, which can be Record<string, string>
+					// CRITICAL: For GCS signed URLs with X-Goog-SignedHeaders=host,
+					// we should NOT send Content-Type header manually
+					// Only the 'host' header is signed, so sending Content-Type might break signature
 					const fetchHeaders: HeadersInit = {};
-					for (const [key, value] of Object.entries(uploadHeaders)) {
-						fetchHeaders[key] = value;
+
+					// Check if X-Goog-SignedHeaders=host in URL query params
+					const urlObj = new URL(stagedTarget.url);
+					const signedHeaders = urlObj.searchParams.get("X-Goog-SignedHeaders");
+					const shouldOmitContentType = signedHeaders === "host";
+
+					if (shouldOmitContentType) {
+						console.error(
+							`[Upload Debug] X-Goog-SignedHeaders=host detected - NOT setting Content-Type header manually`
+						);
+						console.error(
+							`[Upload Debug] WARNING: Using Buffer without Content-Type - this may fail`
+						);
+						// Don't add Content-Type header - let fetch set it automatically
+						// This matches curl -F behavior
+					} else {
+						// Include Content-Type header if it's part of signed headers
+						for (const [key, value] of Object.entries(uploadHeaders)) {
+							fetchHeaders[key] = value;
+						}
 					}
 
 					// CRITICAL: For GCS signed URLs, DO NOT add Content-Length manually
 					// GCS will calculate it from the body, and adding it manually might break the signature
-					// Only use headers from getHeaders() - don't add any additional headers
 					if (
 						fetchHeaders["Content-Length"] ||
 						fetchHeaders["content-length"]
 					) {
 						console.error(
-							`[Upload Debug] WARNING: Content-Length header present from getHeaders() - this might break signature`
+							`[Upload Debug] WARNING: Content-Length header present - removing it`
 						);
-					} else {
-						console.error(
-							`[Upload Debug] No Content-Length header (GCS will calculate from body)`
-						);
+						delete fetchHeaders["Content-Length"];
+						delete fetchHeaders["content-length"];
 					}
 
 					console.error(
@@ -785,39 +853,57 @@ export async function uploadBynderAsset(
 						statusText: fetchResponse.statusText,
 						data: responseData,
 					};
-				} else {
-					// Fallback to axios if we don't have buffer + headers
-					// This should not happen when using form-data package, but handle it gracefully
-					console.log(
-						`[Upload Debug] WARNING: Falling back to axios - buffer: ${uploadBody instanceof Buffer}, headers: ${Object.keys(uploadHeaders).length > 0}`
-					);
-					if (Object.keys(uploadHeaders).length > 0) {
-						axiosConfig.headers = uploadHeaders;
-						console.log(
-							`[Upload Debug] Using headers from getHeaders() with axios`
-						);
-					} else {
-						console.log(
-							`[Upload Debug] WARNING: No headers from getHeaders() - axios will set Content-Type automatically (may break signature)`
-						);
-					}
-					const axiosResponse = await axios.post(
-						stagedTarget.url,
-						uploadBody,
-						axiosConfig
-					);
-					uploadResponse = {
-						status: axiosResponse.status,
-						statusText: axiosResponse.statusText,
-						data: axiosResponse.data,
-					};
 				}
 
-				console.log(
-					`[Upload Debug] Upload successful: HTTP ${uploadResponse.status} ${uploadResponse.statusText}`
-				);
-				lastError = null;
-				break; // Success, exit retry loop
+				// If uploadResponse is not set yet, try Buffer + headers approach or axios fallback
+				if (!uploadResponse) {
+					if (
+						uploadBody instanceof Buffer &&
+						Object.keys(uploadHeaders).length > 0
+					) {
+						// Buffer + headers approach already handled above
+						// This should not be reached, but handle it gracefully
+						console.error(
+							`[Upload Debug] WARNING: uploadResponse not set but Buffer + headers available - this should not happen`
+						);
+					} else {
+						// Fallback to axios if we don't have buffer + headers
+						// This should not happen when using form-data package, but handle it gracefully
+						console.log(
+							`[Upload Debug] WARNING: Falling back to axios - buffer: ${uploadBody instanceof Buffer}, headers: ${Object.keys(uploadHeaders).length > 0}`
+						);
+						if (Object.keys(uploadHeaders).length > 0) {
+							axiosConfig.headers = uploadHeaders;
+							console.log(
+								`[Upload Debug] Using headers from getHeaders() with axios`
+							);
+						} else {
+							console.log(
+								`[Upload Debug] WARNING: No headers from getHeaders() - axios will set Content-Type automatically (may break signature)`
+							);
+						}
+						const axiosResponse = await axios.post(
+							stagedTarget.url,
+							uploadBody,
+							axiosConfig
+						);
+						uploadResponse = {
+							status: axiosResponse.status,
+							statusText: axiosResponse.statusText,
+							data: axiosResponse.data,
+						};
+					}
+				}
+
+				if (uploadResponse) {
+					console.log(
+						`[Upload Debug] Upload successful: HTTP ${uploadResponse.status} ${uploadResponse.statusText}`
+					);
+					lastError = null;
+					break; // Success, exit retry loop
+				} else {
+					throw new Error("uploadResponse not set after all upload attempts");
+				}
 			} catch (axiosError) {
 				// Enhanced error logging for debugging
 				if (axios.isAxiosError(axiosError)) {

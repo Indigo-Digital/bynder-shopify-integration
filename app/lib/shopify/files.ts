@@ -657,7 +657,7 @@ export async function uploadBynderAsset(
 						uploadHeaders["content-type"] ||
 						"";
 					const boundaryMatch = contentType.match(/boundary=([^;]+)/);
-					if (boundaryMatch && boundaryMatch[1]) {
+					if (boundaryMatch?.[1]) {
 						const boundary = boundaryMatch[1].trim();
 						console.log(`[Upload Debug] Content-Type boundary: ${boundary}`);
 						// Verify boundary appears in body
@@ -731,15 +731,19 @@ export async function uploadBynderAsset(
 						fetchHeaders[key] = value;
 					}
 
-					// CRITICAL: For GCS signed URLs, Content-Length might be required
-					// But don't set it if it's already in headers (from getHeaders())
+					// CRITICAL: For GCS signed URLs, DO NOT add Content-Length manually
+					// GCS will calculate it from the body, and adding it manually might break the signature
+					// Only use headers from getHeaders() - don't add any additional headers
 					if (
-						!fetchHeaders["Content-Length"] &&
-						!fetchHeaders["content-length"]
+						fetchHeaders["Content-Length"] ||
+						fetchHeaders["content-length"]
 					) {
-						fetchHeaders["Content-Length"] = bodyArray.length.toString();
 						console.log(
-							`[Upload Debug] Added Content-Length header: ${bodyArray.length}`
+							`[Upload Debug] WARNING: Content-Length header present from getHeaders() - this might break signature`
+						);
+					} else {
+						console.log(
+							`[Upload Debug] No Content-Length header (GCS will calculate from body)`
 						);
 					}
 

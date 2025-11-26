@@ -84,7 +84,11 @@ prisma/
 **File Upload:**
 - ✅ Staged uploads (Shopify Files API)
 - ✅ Support for images and generic files
-- ✅ Proper file naming convention: `campaigns/{tag}/{filename}`
+- ✅ Configurable file organization with template system
+- ✅ Template placeholders: `{tag}`, `{dateCreated:YYYY/MM/DD}`, `{dateModified:YYYY/MM/DD}`, `{name}`, `{type}`
+- ✅ Tag matching: uses first tag matching sync tags for predictable organization
+- ✅ Filename prefix/suffix support
+- ✅ Alt text prefix support
 - ✅ Tag sanitization for file paths
 - ✅ Retry logic for transient failures
 - ✅ GCS/S3 signed URL handling
@@ -134,7 +138,7 @@ prisma/
 
 **Pages Implemented:**
 1. **Dashboard** (`/app`) - Overview with stats and quick actions
-2. **Settings** (`/app/settings`) - Bynder connection, tag configuration, asset browser
+2. **Settings** (`/app/settings`) - Bynder connection, tag configuration, asset browser, file organization settings
 3. **Sync Dashboard** (`/app/sync`) - Job management, progress tracking, error details
 4. **Files** (`/app/files`) - Synced assets list with thumbnails, search/filter, pagination, preview modal, and manual import via Bynder Picker
 
@@ -428,6 +432,39 @@ prisma/
 - Responsive design with keyboard navigation support
 
 **Value Delivered:** ⭐⭐⭐ (Medium - Nice to have)
+
+**Status:** ✅ Complete and ready for use
+
+---
+
+### Priority 3.5: Configurable File Organization 📁 ✅ **COMPLETED**
+
+**Why:** Makes Bynder assets easily identifiable and organizable in Shopify Files, addressing merchandiser concerns about finding synced assets.
+
+**What Was Built:**
+- ✅ Template-based file organization system with flexible placeholders
+- ✅ Support for organizing files by tags, dates, asset name, and type
+- ✅ Tag matching: uses first tag matching configured sync tags for predictable organization
+- ✅ Filename prefix/suffix configuration
+- ✅ Alt text prefix configuration
+- ✅ Settings UI with live preview of template output
+- ✅ Default template: `bynder/{tag}` with fallback to "uncategorized"
+
+**Implementation Details:**
+- Template parser utility (`app/lib/shopify/file-template.ts`) with placeholder support
+- Database schema updates: `fileFolderTemplate`, `filenamePrefix`, `filenameSuffix`, `altTextPrefix` fields
+- Settings page UI with template editor and preview
+- Updated all sync functions to use template system
+- Tag matching logic: finds first tag matching sync tags, falls back to first tag, then "uncategorized"
+
+**Template Placeholders:**
+- `{tag}` - First tag matching sync tags, or first tag, or "uncategorized"
+- `{dateCreated:YYYY}`, `{dateCreated:MM}`, `{dateCreated:DD}` - Date created components
+- `{dateModified:YYYY}`, `{dateModified:MM}`, `{dateModified:DD}` - Date modified components
+- `{name}` - Asset name (sanitized)
+- `{type}` - Asset type
+
+**Value Delivered:** ⭐⭐⭐⭐ (High - Solves merchandiser discoverability problem)
 
 **Status:** ✅ Complete and ready for use
 
@@ -737,8 +774,10 @@ The Bynder-Shopify integration app has a **solid foundation** with core function
 
 ---
 
-**Document Version:** 2.2  
+**Document Version:** 2.3  
 **Last Updated:** January 2025  
 **Co-Pilot Review:** ✅ Validated and aligned  
-**Recent Updates:** Asset Preview & UX Polish (Priority 3) completed - January 2025
+**Recent Updates:** 
+- Configurable File Organization (Priority 3.5) completed - January 2025
+- Asset Preview & UX Polish (Priority 3) completed - January 2025
 

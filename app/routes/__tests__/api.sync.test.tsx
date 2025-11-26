@@ -160,7 +160,14 @@ describe("api.sync", () => {
 			expect.any(Object),
 			"asset-123",
 			"shop-123",
-			"manual"
+			"manual",
+			{
+				fileFolderTemplate: undefined,
+				filenamePrefix: undefined,
+				filenameSuffix: undefined,
+				altTextPrefix: undefined,
+				syncTags: undefined,
+			}
 		);
 	});
 

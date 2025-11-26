@@ -246,12 +246,14 @@ describe("uploadBynderAsset", () => {
 		expect(stagedUploadVariables?.input?.[0]?.filename).toBe("test-image.jpg");
 
 		// Verify fileCreate uses the full path
+		// With no tags and no shopConfig, should use default template: bynder/{tag}
+		// Since no tags provided, tag becomes "uncategorized"
 		const fileCreateCall = (mockAdmin.graphql as ReturnType<typeof vi.fn>).mock
 			.calls[1];
 		expect(fileCreateCall).toBeDefined();
 		const fileCreateVariables = fileCreateCall?.[1]?.variables;
 		expect(fileCreateVariables?.files?.[0]?.filename).toMatch(
-			/^campaigns\/shopify-sync\/test-image\.jpg$/
+			/^bynder\/uncategorized\/test-image\.jpg$/
 		);
 	});
 });

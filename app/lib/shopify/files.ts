@@ -10,11 +10,23 @@ import { setBynderMetafields } from "./metafields.js";
 /**
  * Download file from URL and return as buffer
  * Supports optional authentication token
+ *
+ * IMPORTANT: Bynder's download API returns a JSON response with an S3 URL,
+ * not the actual file bytes. This function detects that pattern and follows
+ * the S3 URL to download the actual file.
  */
 async function downloadFile(
 	url: string,
-	authToken?: string
+	authToken?: string,
+	depth = 0
 ): Promise<{ buffer: Buffer; contentType: string }> {
+	// Prevent infinite redirect loops
+	if (depth > 3) {
+		throw new Error(
+			`Download redirect loop detected: Too many redirects (${depth}). URL: ${url}`
+		);
+	}
+
 	const headers: HeadersInit = {};
 	if (authToken) {
 		headers.Authorization = `Bearer ${authToken}`;
@@ -64,11 +76,53 @@ async function downloadFile(
 		throw new Error(`Failed to download file from ${url}: ${errorDetails}`);
 	}
 
+	// Check if response is JSON with s3_file (Bynder's download API pattern)
+	// Bynder's /v4/media/{id}/download endpoint returns JSON like:
+	// {"s3_file": "https://bynder-media-*.s3.*.amazonaws.com/..."}
+	const responseContentType =
+		response.headers.get("content-type") || "application/octet-stream";
+
+	if (responseContentType.includes("application/json")) {
+		try {
+			const jsonData = await response.json();
+
+			// Check for Bynder's s3_file redirect pattern
+			if (jsonData.s3_file && typeof jsonData.s3_file === "string") {
+				console.log(
+					`[Download] Bynder returned S3 URL redirect, following: ${jsonData.s3_file.substring(0, 100)}...`
+				);
+				// Recursively download from the actual S3 URL (no auth needed for S3)
+				return downloadFile(jsonData.s3_file, undefined, depth + 1);
+			}
+
+			// If JSON but no s3_file, this is unexpected - throw error
+			throw new Error(
+				`Bynder returned unexpected JSON response without s3_file. Keys: ${Object.keys(jsonData).join(", ")}`
+			);
+		} catch (parseError) {
+			// If JSON parsing fails, it might be a different content type that included "json"
+			// Fall through to treat as binary
+			if (
+				parseError instanceof Error &&
+				parseError.message.includes("s3_file")
+			) {
+				throw parseError;
+			}
+			console.warn(
+				`[Download] Response had JSON content-type but failed to parse: ${parseError}`
+			);
+		}
+	}
+
 	const arrayBuffer = await response.arrayBuffer();
 	const buffer = Buffer.from(arrayBuffer);
-	const contentType =
-		response.headers.get("content-type") || "application/octet-stream";
-	return { buffer, contentType };
+
+	// Log download success with actual file details
+	console.log(
+		`[Download] Successfully downloaded file: ${buffer.length} bytes, Content-Type: ${responseContentType}`
+	);
+
+	return { buffer, contentType: responseContentType };
 }
 
 /**

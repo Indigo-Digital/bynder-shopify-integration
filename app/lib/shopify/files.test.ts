@@ -70,12 +70,18 @@ describe("uploadBynderAsset", () => {
 		});
 
 		// Second fetch: Upload to staged URL (we're using fetch now instead of axios)
-		mockFetch.mockResolvedValueOnce({
+		// Need 3 mocks for retry attempts (MAX_RETRIES = 3)
+		const mockHeaders = new Headers();
+		const mockFetchResponse = {
 			ok: true,
 			status: 200,
 			statusText: "OK",
+			headers: mockHeaders,
 			text: async () => "",
-		});
+		};
+		mockFetch.mockResolvedValueOnce(mockFetchResponse);
+		mockFetch.mockResolvedValueOnce(mockFetchResponse);
+		mockFetch.mockResolvedValueOnce(mockFetchResponse);
 
 		// Mock Shopify GraphQL responses
 		// First call: stagedUploadsCreate
@@ -179,12 +185,18 @@ describe("uploadBynderAsset", () => {
 		});
 
 		// Second fetch: Upload to staged URL (we're using fetch now instead of axios)
-		mockFetch.mockResolvedValueOnce({
+		// Need 3 mocks for retry attempts (MAX_RETRIES = 3)
+		const mockHeaders2 = new Headers();
+		const mockFetchResponse2 = {
 			ok: true,
 			status: 200,
 			statusText: "OK",
+			headers: mockHeaders2,
 			text: async () => "",
-		});
+		};
+		mockFetch.mockResolvedValueOnce(mockFetchResponse2);
+		mockFetch.mockResolvedValueOnce(mockFetchResponse2);
+		mockFetch.mockResolvedValueOnce(mockFetchResponse2);
 
 		// Mock Shopify GraphQL responses
 		// First call: stagedUploadsCreate

@@ -296,8 +296,12 @@ export async function uploadBynderAsset(
 	}
 
 	// Log staged upload details for debugging
+	const urlObj = new URL(stagedTarget.url);
+	console.log(`[Upload Debug] Staged upload URL: ${stagedTarget.url}`);
+	console.log(`[Upload Debug] URL pathname: ${urlObj.pathname}`);
+	console.log(`[Upload Debug] URL query params: ${urlObj.search}`);
 	console.log(
-		`[Upload Debug] Staged upload URL: ${stagedTarget.url.substring(0, 150)}...`
+		`[Upload Debug] URL query param keys: ${Array.from(urlObj.searchParams.keys()).join(", ") || "none"}`
 	);
 	console.log(
 		`[Upload Debug] Staged upload parameters count: ${stagedTarget.parameters.length}`
@@ -305,6 +309,14 @@ export async function uploadBynderAsset(
 	console.log(
 		`[Upload Debug] Staged upload parameter names: ${stagedTarget.parameters.map((p: { name: string }) => p.name).join(", ")}`
 	);
+	// Log all parameters with their values (truncated for security)
+	for (const param of stagedTarget.parameters) {
+		const valuePreview =
+			param.value.length > 100
+				? `${param.value.substring(0, 100)}... (${param.value.length} chars)`
+				: param.value;
+		console.log(`[Upload Debug] Parameter "${param.name}": ${valuePreview}`);
+	}
 
 	// Step 2: Upload file to staged upload URL
 	// For Shopify staged uploads (typically S3), we need to:
@@ -354,6 +366,8 @@ export async function uploadBynderAsset(
 
 	// Helper function to create FormData for upload
 	// Explicitly use form-data package to ensure getHeaders() and getBuffer() are available
+	// CRITICAL: Parameters must be added in the exact order Shopify provides them
+	// The file MUST be added last - this is critical for GCS signature validation
 	const createFormData = (): FormData => {
 		const retryFormData = new FormData();
 
@@ -362,20 +376,28 @@ export async function uploadBynderAsset(
 
 		// Log parameters being added (for debugging signature issues)
 		console.log(
-			`[Upload Debug] Adding ${stagedTarget.parameters.length} parameters to FormData`
+			`[Upload Debug] Creating FormData with ${stagedTarget.parameters.length} parameters + file`
 		);
-		for (const param of stagedTarget.parameters) {
+		console.log(
+			`[Upload Debug] Parameter order: ${stagedTarget.parameters.map((p: { name: string }) => p.name).join(" -> ")} -> file`
+		);
+
+		// Add parameters from staged upload in the EXACT order Shopify provides
+		// This order is critical for GCS signature validation
+		for (let i = 0; i < stagedTarget.parameters.length; i++) {
+			const param = stagedTarget.parameters[i];
+			retryFormData.append(param.name, param.value);
+			const valuePreview =
+				param.value.length > 80
+					? `${param.value.substring(0, 80)}...`
+					: param.value;
 			console.log(
-				`[Upload Debug] Parameter: ${param.name} = ${param.value.substring(0, 50)}${param.value.length > 50 ? "..." : ""}`
+				`[Upload Debug] Added parameter ${i + 1}/${stagedTarget.parameters.length}: "${param.name}" = "${valuePreview}"`
 			);
 		}
 
-		// Add parameters from staged upload first (S3/GCS requires specific order)
-		for (const param of stagedTarget.parameters) {
-			retryFormData.append(param.name, param.value);
-		}
-
-		// Add the file last - this is critical for S3/GCS uploads
+		// Add the file last - this is CRITICAL for S3/GCS uploads
+		// Shopify's documentation explicitly states the file must be the last parameter
 		if (retryIsPolyfill) {
 			// form-data polyfill expects Buffer or stream, not File
 			const polyfillFormData = retryFormData as unknown as {
@@ -390,7 +412,7 @@ export async function uploadBynderAsset(
 				contentType: contentType,
 			});
 			console.log(
-				`[Upload Debug] Added file to FormData (polyfill): ${sanitizedStagedFilename}, size: ${buffer.length} bytes, contentType: ${contentType}`
+				`[Upload Debug] Added file (last): "${sanitizedStagedFilename}", size: ${buffer.length} bytes, contentType: ${contentType}`
 			);
 		} else {
 			// Native FormData (Node.js 20+) supports File objects
@@ -403,7 +425,7 @@ export async function uploadBynderAsset(
 			);
 			retryFormData.append("file", fileToUpload);
 			console.log(
-				`[Upload Debug] Added file to FormData (native): ${sanitizedStagedFilename}, size: ${buffer.length} bytes, contentType: ${contentType}`
+				`[Upload Debug] Added file (last): "${sanitizedStagedFilename}", size: ${buffer.length} bytes, contentType: ${contentType}`
 			);
 		}
 
@@ -447,8 +469,12 @@ export async function uploadBynderAsset(
 					typeof polyfillFormData.getHeaders === "function" &&
 					typeof polyfillFormData.getBuffer === "function"
 				) {
-					// CRITICAL: Call getHeaders() FIRST to lock in the boundary
-					// Then call getBuffer() to get the body with that exact boundary
+					// CRITICAL: Call getHeaders() FIRST on the SAME FormData instance to lock in the boundary
+					// Then call getBuffer() on the SAME instance to get the body with that exact boundary
+					// The boundary in Content-Type MUST exactly match the boundary used in the body
+					console.log(
+						`[Upload Debug] Calling getHeaders() FIRST to lock in multipart boundary`
+					);
 					const rawHeaders = polyfillFormData.getHeaders();
 
 					// Convert HeadersInit to Record<string, string>
@@ -464,11 +490,26 @@ export async function uploadBynderAsset(
 						uploadHeaders = rawHeaders as Record<string, string>;
 					}
 
-					// Get the buffer (uses the boundary from getHeaders())
+					// Extract and log the boundary from Content-Type
+					const contentTypeHeader =
+						uploadHeaders["Content-Type"] || uploadHeaders["content-type"];
+					if (contentTypeHeader) {
+						const boundaryMatch = contentTypeHeader.match(/boundary=([^;]+)/);
+						if (boundaryMatch) {
+							console.log(
+								`[Upload Debug] Content-Type boundary: ${boundaryMatch[1]}`
+							);
+						}
+					}
+
+					// Get the buffer (uses the boundary from getHeaders() on the same instance)
+					console.log(
+						`[Upload Debug] Calling getBuffer() on SAME FormData instance to get body with matching boundary`
+					);
 					const bodyBuffer = polyfillFormData.getBuffer();
 					uploadBody = bodyBuffer;
 
-					// Log headers for debugging
+					// Log comprehensive request details
 					const headersForLog: Record<string, string> = {};
 					for (const [key, value] of Object.entries(uploadHeaders)) {
 						if (key.toLowerCase() === "content-type") {
@@ -482,11 +523,44 @@ export async function uploadBynderAsset(
 						`[Upload Debug] Using form-data polyfill with getBuffer() + getHeaders()`
 					);
 					console.log(
-						`[Upload Debug] Headers: ${JSON.stringify(headersForLog, null, 2)}`
+						`[Upload Debug] Request headers: ${JSON.stringify(headersForLog, null, 2)}`
 					);
 					console.log(
 						`[Upload Debug] Body buffer size: ${bodyBuffer.length} bytes`
 					);
+
+					// Log first and last bytes of body to verify format
+					if (bodyBuffer.length > 0) {
+						const firstBytes = Array.from(bodyBuffer.slice(0, 100))
+							.map((b) => b.toString(16).padStart(2, "0"))
+							.join(" ");
+						const lastBytes = Array.from(
+							bodyBuffer.slice(Math.max(0, bodyBuffer.length - 100))
+						)
+							.map((b) => b.toString(16).padStart(2, "0"))
+							.join(" ");
+						console.log(
+							`[Upload Debug] Body first 100 bytes (hex): ${firstBytes}`
+						);
+						console.log(
+							`[Upload Debug] Body last 100 bytes (hex): ${lastBytes}`
+						);
+
+						// Check if body starts with boundary marker
+						const bodyStart = bodyBuffer.toString(
+							"utf8",
+							0,
+							Math.min(200, bodyBuffer.length)
+						);
+						if (bodyStart.includes("--")) {
+							const boundaryInBody = bodyStart.match(/^--([^\r\n]+)/);
+							if (boundaryInBody) {
+								console.log(
+									`[Upload Debug] Boundary in body start: ${boundaryInBody[1]}`
+								);
+							}
+						}
+					}
 				} else {
 					console.log(
 						`[Upload Debug] WARNING: form-data polyfill detected but getHeaders() or getBuffer() not available`
@@ -520,35 +594,68 @@ export async function uploadBynderAsset(
 				);
 			}
 
-			// Use axios to upload - it handles form-data streams correctly
-			// CRITICAL: For GCS signed URLs with X-Goog-SignedHeaders=host, only host header is signed
-			// But the request body (multipart form) must still match exactly what was signed
-			// The issue might be that axios modifies Content-Type or the request format
+			// CRITICAL: For GCS signed URLs, the request body (multipart form) must match exactly what was signed
+			// The signature is calculated based on:
+			// 1. HTTP method (POST)
+			// 2. Canonical URI (path)
+			// 3. Canonical query string (from URL)
+			// 4. Canonical headers (host header)
+			// 5. Signed headers (host)
+			// 6. Payload hash (UNSIGNED-PAYLOAD means hash is not included, but format still matters)
 			try {
-				// Log the exact URL and headers before sending
-				const urlObj = new URL(stagedTarget.url);
-				console.log(`[Upload Debug] Upload URL path: ${urlObj.pathname}`);
+				// Log comprehensive request details before sending
+				const uploadUrlObj = new URL(stagedTarget.url);
+				console.log(`[Upload Debug] ===== UPLOAD REQUEST DETAILS =====`);
+				console.log(`[Upload Debug] Full URL: ${stagedTarget.url}`);
+				console.log(`[Upload Debug] URL pathname: ${uploadUrlObj.pathname}`);
 				console.log(
-					`[Upload Debug] URL query params: ${Array.from(urlObj.searchParams.keys()).join(", ")}`
+					`[Upload Debug] URL query string: ${uploadUrlObj.search || "(none)"}`
 				);
+				if (uploadUrlObj.search) {
+					console.log(
+						`[Upload Debug] URL query param keys: ${Array.from(uploadUrlObj.searchParams.keys()).join(", ")}`
+					);
+					// Log query param values (truncated)
+					for (const [key, value] of uploadUrlObj.searchParams.entries()) {
+						const valuePreview =
+							value.length > 80 ? `${value.substring(0, 80)}...` : value;
+						console.log(
+							`[Upload Debug]   Query param "${key}": "${valuePreview}"`
+						);
+					}
+				}
+				console.log(`[Upload Debug] HTTP Method: POST`);
 				console.log(
-					`[Upload Debug] Headers being sent: ${JSON.stringify(uploadHeaders, null, 2)}`
+					`[Upload Debug] Request headers count: ${Object.keys(uploadHeaders).length}`
 				);
+				for (const [key, value] of Object.entries(uploadHeaders)) {
+					if (key.toLowerCase() === "content-type") {
+						console.log(`[Upload Debug]   Header "${key}": ${value}`);
+					} else {
+						const valuePreview =
+							value.length > 100 ? `${value.substring(0, 100)}...` : value;
+						console.log(`[Upload Debug]   Header "${key}": "${valuePreview}"`);
+					}
+				}
 				console.log(
-					`[Upload Debug] FormData type: ${isPolyfill ? "polyfill" : "native"}, has getHeaders: ${typeof (formData as unknown as { getHeaders?: () => HeadersInit }).getHeaders === "function"}`
+					`[Upload Debug] Body type: ${uploadBody instanceof Buffer ? "Buffer" : "FormData"}`
 				);
+				if (uploadBody instanceof Buffer) {
+					console.log(`[Upload Debug] Body size: ${uploadBody.length} bytes`);
+				}
 				// Count FormData entries - form-data package doesn't have entries() method
-				// We're always using form-data package now, so count manually
-				const polyfillFormData = formData as unknown as {
+				const polyfillFormDataForCount = formData as unknown as {
 					_streams?: unknown[];
 					_length?: number;
 				};
-				// The polyfill stores entries in _streams array (rough count)
 				const formDataEntryCount =
-					polyfillFormData._streams?.length || polyfillFormData._length || 0;
+					polyfillFormDataForCount._streams?.length ||
+					polyfillFormDataForCount._length ||
+					0;
 				console.log(
-					`[Upload Debug] Number of FormData entries: ${formDataEntryCount}`
+					`[Upload Debug] FormData entries count: ${formDataEntryCount} (${stagedTarget.parameters.length} params + 1 file)`
 				);
+				console.log(`[Upload Debug] ====================================`);
 
 				// CRITICAL: For GCS signed URLs, we might need to NOT set Content-Type manually
 				// and let axios/form-data set it automatically, OR ensure it matches exactly
@@ -568,31 +675,57 @@ export async function uploadBynderAsset(
 
 				// CRITICAL: For GCS signed URLs, we MUST use native fetch with the exact Buffer
 				// from getBuffer() and exact headers from getHeaders() to avoid any modifications
-				// axios might make to the request
+				// that axios or other HTTP clients might make to the request
+				// The Content-Type header with boundary MUST exactly match the body format
 				if (
 					uploadBody instanceof Buffer &&
 					Object.keys(uploadHeaders).length > 0
 				) {
 					console.log(
-						`[Upload Debug] Using native fetch with Buffer from getBuffer() and headers from getHeaders()`
+						`[Upload Debug] Sending request using native fetch with exact Buffer and headers`
 					);
 					console.log(
-						`[Upload Debug] Content-Type: ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "not set"}`
+						`[Upload Debug] Content-Type header: ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "NOT SET - THIS WILL FAIL"}`
 					);
 					console.log(
 						`[Upload Debug] Body buffer size: ${uploadBody.length} bytes`
 					);
 
-					// Use native fetch to avoid axios modifications
-					// Convert Buffer to Uint8Array for fetch API
+					// Use native fetch to avoid any modifications by HTTP clients
+					// Convert Buffer to Uint8Array for fetch API compatibility
 					const bodyArray = new Uint8Array(uploadBody);
+
+					// Ensure headers are properly formatted for fetch
+					// fetch expects HeadersInit, which can be Record<string, string>
+					const fetchHeaders: HeadersInit = {};
+					for (const [key, value] of Object.entries(uploadHeaders)) {
+						fetchHeaders[key] = value;
+					}
+
+					console.log(
+						`[Upload Debug] Sending POST request to: ${stagedTarget.url}`
+					);
 					const fetchResponse = await fetch(stagedTarget.url, {
 						method: "POST",
 						body: bodyArray,
-						headers: uploadHeaders,
+						headers: fetchHeaders,
 					});
 
 					const responseData = await fetchResponse.text();
+					console.log(
+						`[Upload Debug] Response status: ${fetchResponse.status} ${fetchResponse.statusText}`
+					);
+					console.log(
+						`[Upload Debug] Response headers: ${JSON.stringify(Object.fromEntries(fetchResponse.headers.entries()), null, 2)}`
+					);
+					if (responseData) {
+						const responsePreview =
+							responseData.length > 500
+								? `${responseData.substring(0, 500)}...`
+								: responseData;
+						console.log(`[Upload Debug] Response body: ${responsePreview}`);
+					}
+
 					uploadResponse = {
 						status: fetchResponse.status,
 						statusText: fetchResponse.statusText,
@@ -600,11 +733,19 @@ export async function uploadBynderAsset(
 					};
 				} else {
 					// Fallback to axios if we don't have buffer + headers
+					// This should not happen when using form-data package, but handle it gracefully
 					console.log(
 						`[Upload Debug] WARNING: Falling back to axios - buffer: ${uploadBody instanceof Buffer}, headers: ${Object.keys(uploadHeaders).length > 0}`
 					);
 					if (Object.keys(uploadHeaders).length > 0) {
 						axiosConfig.headers = uploadHeaders;
+						console.log(
+							`[Upload Debug] Using headers from getHeaders() with axios`
+						);
+					} else {
+						console.log(
+							`[Upload Debug] WARNING: No headers from getHeaders() - axios will set Content-Type automatically (may break signature)`
+						);
 					}
 					const axiosResponse = await axios.post(
 						stagedTarget.url,

@@ -49,6 +49,7 @@ model Shop {
   webhookSubscriptions WebhookSubscription[]
   webhookEvents     WebhookEvent[]
   syncJobs          SyncJob[]
+  syncMetrics       SyncMetrics[]
 }
 
 model SyncedAsset {
@@ -117,4 +118,20 @@ model WebhookEvent {
   @@index([shopId])
   @@index([status])
   @@index([createdAt])
+}
+
+model SyncMetrics {
+  id            String   @id @default(cuid())
+  shopId        String
+  syncJobId     String?  // Optional link to specific job
+  metricType    String   // "api_call", "sync_duration", "throughput", "error_rate"
+  metricName    String   // "bynder_api_calls", "shopify_api_calls", "assets_per_second", etc.
+  value         Float
+  metadata      String?  // JSON string for additional context
+  recordedAt    DateTime @default(now())
+  
+  shop          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  
+  @@index([shopId, recordedAt])
+  @@index([syncJobId])
 }

@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import prisma from "../db.server.js";
+import { getShopAlerts } from "../lib/alerts/checker.js";
+import { getMetricsSummary } from "../lib/metrics/queries.js";
 import { categorizeErrors } from "../lib/sync/error-categorization.js";
 import { authenticate } from "../shopify.server.js";
 
@@ -35,16 +37,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		where: { shopId: shopConfig.id },
 	});
 
+	// Get metrics summary
+	const metricsSummary = await getMetricsSummary(shopConfig.id, 10);
+
+	// Get alerts
+	const alerts = await getShopAlerts(shopConfig.id);
+
 	return {
 		shop,
 		shopConfig,
 		syncJobs,
 		syncedAssetsCount,
+		metricsSummary,
+		alerts,
 	};
 };
 
 export default function SyncDashboard() {
-	const { shopConfig, syncJobs, syncedAssetsCount } =
+	const { shopConfig, syncJobs, syncedAssetsCount, metricsSummary, alerts } =
 		useLoaderData<typeof loader>();
 	const fetcher = useFetcher();
 	const retryFetcher = useFetcher();
@@ -211,6 +221,17 @@ export default function SyncDashboard() {
 					</style>
 				</s-banner>
 			)}
+			{/* Display alerts */}
+			{alerts && alerts.length > 0 && (
+				<>
+					{alerts.map((alert, index) => (
+						<s-banner key={index} tone={alert.severity}>
+							{alert.message}
+						</s-banner>
+					))}
+				</>
+			)}
+
 			{syncResult && showSuccess && (
 				<s-banner
 					tone={
@@ -297,6 +318,67 @@ export default function SyncDashboard() {
 						<s-heading>{syncedAssetsCount}</s-heading>
 					</s-box>
 				</s-stack>
+				{metricsSummary && (
+					<div style={{ marginTop: "1rem" }}>
+						<s-heading level={3}>Performance Metrics (Last 10 Jobs)</s-heading>
+						<s-stack direction="inline" gap="base" style={{ marginTop: "0.5rem" }}>
+							<s-box padding="base" borderWidth="base" borderRadius="base">
+								<s-text>Avg Sync Duration</s-text>
+								<s-heading>
+									{metricsSummary.averageSyncDuration > 0
+										? `${metricsSummary.averageSyncDuration}s`
+										: "N/A"}
+								</s-heading>
+							</s-box>
+							<s-box padding="base" borderWidth="base" borderRadius="base">
+								<s-text>Avg Throughput</s-text>
+								<s-heading>
+									{metricsSummary.averageThroughput > 0
+										? `${metricsSummary.averageThroughput.toFixed(1)} assets/sec`
+										: "N/A"}
+								</s-heading>
+							</s-box>
+							<s-box padding="base" borderWidth="base" borderRadius="base">
+								<s-text>Total API Calls</s-text>
+								<s-heading>
+									{metricsSummary.totalApiCalls > 0
+										? metricsSummary.totalApiCalls.toLocaleString()
+										: "N/A"}
+								</s-heading>
+							</s-box>
+							<s-box padding="base" borderWidth="base" borderRadius="base">
+								<s-text>Error Rate Trend</s-text>
+								<s-heading
+									style={{
+										color:
+											metricsSummary.errorRateTrend > 0
+												? "#d72c0d"
+												: metricsSummary.errorRateTrend < 0
+													? "#008060"
+													: "#666",
+									}}
+								>
+									{metricsSummary.errorRateTrend !== 0
+										? `${metricsSummary.errorRateTrend > 0 ? "+" : ""}${metricsSummary.errorRateTrend.toFixed(1)}%`
+										: "0%"}
+								</s-heading>
+							</s-box>
+							{metricsSummary.rateLimitHits > 0 && (
+								<s-box
+									padding="base"
+									borderWidth="base"
+									borderRadius="base"
+									style={{ borderColor: "#d72c0d" }}
+								>
+									<s-text>Rate Limit Hits</s-text>
+									<s-heading style={{ color: "#d72c0d" }}>
+										{metricsSummary.rateLimitHits}
+									</s-heading>
+								</s-box>
+							)}
+						</s-stack>
+					</div>
+				)}
 				<div style={{ marginTop: "1rem" }}>
 					<s-stack direction="inline" gap="base">
 						<s-button

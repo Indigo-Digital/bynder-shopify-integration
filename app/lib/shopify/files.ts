@@ -2,6 +2,7 @@ import axios from "axios";
 import FormData from "form-data";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
+import { recordApiCall } from "../metrics/collector.js";
 import type { AdminApi } from "../types.js";
 import { generateFilePath, type TemplateContext } from "./file-template.js";
 import { setBynderMetafields } from "./metafields.js";
@@ -77,7 +78,7 @@ export async function uploadBynderAsset(
 	admin: AdminApi,
 	bynderClient: BynderClient,
 	assetId: string,
-	_shopId: string,
+	shopId: string,
 	_syncType: "auto" | "manual" = "manual",
 	shopConfig?: {
 		fileFolderTemplate?: string | null;
@@ -85,10 +86,15 @@ export async function uploadBynderAsset(
 		filenameSuffix?: string | null;
 		altTextPrefix?: string | null;
 		syncTags?: string;
+		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}
 ): Promise<{ fileId: string; fileUrl: string }> {
 	// Get asset info from Bynder
-	const assetInfoRaw = await bynderClient.getMediaInfo({ id: assetId });
+	const assetInfoRaw = await bynderClient.getMediaInfo({
+		id: assetId,
+		shopId,
+		syncJobId: shopConfig?.syncJobId,
+	});
 
 	if (!assetInfoRaw) {
 		throw new Error(`Asset ${assetId} not found in Bynder`);
@@ -116,7 +122,11 @@ export async function uploadBynderAsset(
 	let downloadUrlError: string | undefined;
 
 	try {
-		downloadUrl = await bynderClient.getMediaDownloadUrl({ id: assetId });
+		downloadUrl = await bynderClient.getMediaDownloadUrl({
+			id: assetId,
+			shopId,
+			syncJobId: shopConfig?.syncJobId,
+		});
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		downloadUrlError = `SDK method failed: ${errorMessage}`;
@@ -213,6 +223,12 @@ export async function uploadBynderAsset(
 	const resourceType = isImage ? "IMAGE" : "FILE";
 
 	// Step 1: Create staged upload target
+	// Track Shopify API call
+	await recordApiCall(
+		shopId,
+		"shopify_stagedUploadsCreate",
+		shopConfig?.syncJobId
+	);
 	const stagedUploadResponse = await admin.graphql(
 		`#graphql
       mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
@@ -702,6 +718,12 @@ export async function uploadBynderAsset(
 	}
 
 	// Step 3: Create file in Shopify using the resourceUrl
+	// Track Shopify API call
+	await recordApiCall(
+		shopId,
+		"shopify_fileCreate",
+		shopConfig?.syncJobId
+	);
 	const fileCreateResponse = await admin.graphql(
 		`#graphql
       mutation fileCreate($files: [FileCreateInput!]!) {

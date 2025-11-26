@@ -1,5 +1,10 @@
 import Bynder from "@bynder/bynder-js-sdk";
 import { env } from "../env.server.js";
+import {
+	recordApiCall,
+	recordRateLimitHit,
+} from "../metrics/collector.js";
+import { getRateLimiter } from "./rate-limiter.js";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
 
 export interface BynderPermanentTokenConfig {
@@ -158,15 +163,58 @@ export class BynderClient {
 		limit?: number;
 		page?: number;
 		keyword?: string;
+		shopId?: string; // Optional shopId for metrics tracking
+		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}) {
-		return this.bynder.getMediaList(params);
+		const rateLimiter = getRateLimiter();
+		const wasRateLimited = rateLimiter.getAvailableTokens() < 1;
+		await rateLimiter.acquire();
+
+		// Track metrics if shopId is provided
+		if (params.shopId) {
+			await recordApiCall(
+				params.shopId,
+				"bynder_getMediaList",
+				params.syncJobId
+			);
+			if (wasRateLimited) {
+				await recordRateLimitHit(params.shopId, params.syncJobId);
+			}
+		}
+
+		// Remove shopId and syncJobId from params before calling SDK
+		const { shopId: _shopId, syncJobId: _syncJobId, ...sdkParams } = params;
+		return this.bynder.getMediaList(sdkParams);
 	}
 
 	/**
 	 * Get media info by ID
 	 */
-	async getMediaInfo(params: { id: string }) {
-		return this.bynder.getMediaInfo(params);
+	async getMediaInfo(params: {
+		id: string;
+		shopId?: string; // Optional shopId for metrics tracking
+		syncJobId?: string; // Optional syncJobId for metrics tracking
+	}) {
+		const rateLimiter = getRateLimiter();
+		const wasRateLimited = rateLimiter.getAvailableTokens() < 1;
+		await rateLimiter.acquire();
+
+		// Track metrics if shopId is provided
+		if (params.shopId) {
+			await recordApiCall(
+				params.shopId,
+				"bynder_getMediaInfo",
+				params.syncJobId,
+				{ assetId: params.id }
+			);
+			if (wasRateLimited) {
+				await recordRateLimitHit(params.shopId, params.syncJobId);
+			}
+		}
+
+		// Remove shopId and syncJobId from params before calling SDK
+		const { shopId: _shopId, syncJobId: _syncJobId, ...sdkParams } = params;
+		return this.bynder.getMediaInfo(sdkParams);
 	}
 
 	/**
@@ -176,11 +224,31 @@ export class BynderClient {
 	async getMediaDownloadUrl(params: {
 		id: string;
 		itemId?: string;
+		shopId?: string; // Optional shopId for metrics tracking
+		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}): Promise<string> {
+		const rateLimiter = getRateLimiter();
+		const wasRateLimited = rateLimiter.getAvailableTokens() < 1;
+		await rateLimiter.acquire();
+
+		// Track metrics if shopId is provided
+		if (params.shopId) {
+			await recordApiCall(
+				params.shopId,
+				"bynder_getMediaDownloadUrl",
+				params.syncJobId,
+				{ assetId: params.id }
+			);
+			if (wasRateLimited) {
+				await recordRateLimitHit(params.shopId, params.syncJobId);
+			}
+		}
+
 		try {
 			// Try SDK method first
+			const { shopId: _shopId, syncJobId: _syncJobId, ...sdkParams } = params;
 			if (this.bynder.getMediaDownloadUrl) {
-				const result = await this.bynder.getMediaDownloadUrl(params);
+				const result = await this.bynder.getMediaDownloadUrl(sdkParams);
 				if (typeof result === "string") {
 					return result;
 				}
@@ -214,6 +282,8 @@ export class BynderClient {
 		type?: string;
 		tags?: string | string[];
 		keyword?: string;
+		shopId?: string; // Optional shopId for metrics tracking
+		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}): Promise<
 		Array<{
 			id: string;
@@ -235,10 +305,13 @@ export class BynderClient {
 		let total = 0;
 
 		while (hasMore) {
+			const { shopId, syncJobId, ...listParams } = params;
 			const response = await this.getMediaList({
-				...params,
+				...listParams,
 				page,
 				limit,
+				shopId,
+				syncJobId,
 			});
 
 			if (response && typeof response === "object") {

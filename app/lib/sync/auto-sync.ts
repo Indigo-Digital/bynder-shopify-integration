@@ -1,5 +1,12 @@
+import pMap from "p-map";
 import prisma from "../../db.server.js";
+import { checkSyncJobAlerts } from "../alerts/checker.js";
 import type { BynderClient } from "../bynder/client.js";
+import {
+	recordErrorRate,
+	recordSyncDuration,
+	recordThroughput,
+} from "../metrics/collector.js";
 import { uploadBynderAsset } from "../shopify/files.js";
 import type { AdminApi } from "../types.js";
 import { categorizeErrors } from "./error-categorization.js";
@@ -99,7 +106,11 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 
 		for (const tag of syncTags) {
 			console.log(`[Sync Job ${syncJob.id}] Fetching assets with tag: ${tag}`);
-			const response = await bynderClient.getAllMediaItems({ tags: tag });
+			const response = await bynderClient.getAllMediaItems({
+				tags: tag,
+				shopId,
+				syncJobId: syncJob.id,
+			});
 			console.log(
 				`[Sync Job ${syncJob.id}] Found ${response.length} assets with tag: ${tag}`
 			);
@@ -132,31 +143,28 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 			},
 		});
 
-		// Process each asset
-		for (const [index, asset] of allAssets.entries()) {
-			if (index % 10 === 0) {
-				console.log(
-					`[Sync Job ${syncJob.id}] Processing asset ${index + 1}/${allAssets.length}: ${asset.id}`
-				);
-			}
-			// Check for cancellation before processing each asset
+		// Get concurrency limit from environment (default: 5)
+		const concurrencyLimit = parseInt(
+			process.env.SYNC_CONCURRENCY_LIMIT || "5",
+			10
+		);
+
+		// Track progress for parallel processing
+		let processedCount = 0;
+		const syncStartTime = Date.now();
+
+		// Helper function to process a single asset
+		const processAsset = async (
+			asset: { id: string; tags: string[]; version: number },
+			index: number
+		): Promise<{
+			created: boolean;
+			updated: boolean;
+			error?: { assetId: string; error: string };
+		}> => {
+			// Check for cancellation
 			if (await checkCancellation()) {
-				console.log(
-					`[Sync Job] Job ${syncJob.id} was cancelled, stopping processing`
-				);
-				await prisma.syncJob.update({
-					where: { id: syncJob.id },
-					data: {
-						status: "cancelled",
-						completedAt: new Date(),
-					},
-				});
-				return {
-					processed: allAssets.length,
-					created,
-					updated,
-					errors,
-				};
+				throw new Error("JOB_CANCELLED");
 			}
 
 			try {
@@ -190,6 +198,7 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 							filenameSuffix: shop.filenameSuffix,
 							altTextPrefix: shop.altTextPrefix,
 							syncTags: shop.syncTags,
+							syncJobId: syncJob.id,
 						}
 					);
 
@@ -217,12 +226,38 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 						},
 					});
 
-					if (existing) {
-						updated++;
-					} else {
-						created++;
+					// Update progress incrementally
+					processedCount++;
+					if (processedCount % 10 === 0 || processedCount === allAssets.length) {
+						const elapsed = (Date.now() - syncStartTime) / 1000;
+						const throughput = processedCount / elapsed;
+						const remaining = allAssets.length - processedCount;
+						const estimatedSecondsRemaining = remaining / throughput;
+
+						await prisma.syncJob.update({
+							where: { id: syncJob.id },
+							data: {
+								assetsProcessed: processedCount,
+							},
+						});
+
+						console.log(
+							`[Sync Job ${syncJob.id}] Progress: ${processedCount}/${allAssets.length} (${Math.round(throughput * 10) / 10} assets/sec, ~${Math.round(estimatedSecondsRemaining)}s remaining)`
+						);
 					}
+
+					return {
+						created: !existing,
+						updated: !!existing,
+					};
 				}
+
+				// Asset doesn't need update, but still count as processed
+				processedCount++;
+				return {
+					created: false,
+					updated: false,
+				};
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error ? error.message : String(error);
@@ -231,11 +266,104 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 					errorMessage,
 					error instanceof Error ? error.stack : undefined
 				);
-				errors.push({
-					assetId: asset.id,
-					error: errorMessage,
-				});
+				processedCount++;
+				return {
+					created: false,
+					updated: false,
+					error: {
+						assetId: asset.id,
+						error: errorMessage,
+					},
+				};
 			}
+		};
+
+		// Process assets in parallel with concurrency limit
+		console.log(
+			`[Sync Job ${syncJob.id}] Processing ${allAssets.length} assets with concurrency limit of ${concurrencyLimit}`
+		);
+
+		let results: Array<{
+			created: boolean;
+			updated: boolean;
+			error?: { assetId: string; error: string };
+		}> = [];
+
+		try {
+			results = await pMap(
+				allAssets.entries(),
+				async ([index, asset]) => {
+					// Check for cancellation before processing each asset
+					if (await checkCancellation()) {
+						throw new Error("JOB_CANCELLED");
+					}
+					return processAsset(asset, index);
+				},
+				{
+					concurrency: concurrencyLimit,
+				}
+			);
+		} catch (error) {
+			// Handle cancellation during parallel processing
+			if (
+				error instanceof Error &&
+				error.message === "JOB_CANCELLED"
+			) {
+				console.log(
+					`[Sync Job] Job ${syncJob.id} was cancelled during parallel processing`
+				);
+				await prisma.syncJob.update({
+					where: { id: syncJob.id },
+					data: {
+						status: "cancelled",
+						completedAt: new Date(),
+						assetsProcessed: processedCount,
+					},
+				});
+				return {
+					processed: allAssets.length,
+					created,
+					updated,
+					errors,
+				};
+			}
+			// Re-throw other errors
+			throw error;
+		}
+
+		// Aggregate results
+		for (const result of results) {
+			if (result.error) {
+				errors.push(result.error);
+			} else {
+				if (result.created) {
+					created++;
+				}
+				if (result.updated) {
+					updated++;
+				}
+			}
+		}
+
+		// Check for cancellation after parallel processing
+		if (await checkCancellation()) {
+			console.log(
+				`[Sync Job] Job ${syncJob.id} was cancelled during processing`
+			);
+			await prisma.syncJob.update({
+				where: { id: syncJob.id },
+				data: {
+					status: "cancelled",
+					completedAt: new Date(),
+					assetsProcessed: processedCount,
+				},
+			});
+			return {
+				processed: allAssets.length,
+				created,
+				updated,
+				errors,
+			};
 		}
 
 		// Log summary
@@ -331,6 +459,38 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 				}
 			}
 		}
+
+		// Calculate metrics
+		const syncDuration = (Date.now() - syncStartTime) / 1000; // seconds
+		const throughput = allAssets.length > 0 ? allAssets.length / syncDuration : 0;
+		const errorRate =
+			allAssets.length > 0
+				? (errors.length / allAssets.length) * 100
+				: 0;
+
+		// Record metrics
+		await recordSyncDuration(shopId, syncDuration, syncJob.id);
+		await recordThroughput(shopId, throughput, syncJob.id);
+		if (errorRate > 0) {
+			await recordErrorRate(shopId, errorRate, syncJob.id);
+		}
+
+		// Check for alerts (non-blocking)
+		checkSyncJobAlerts(shopId, syncJob.id)
+			.then((alerts) => {
+				if (alerts.length > 0) {
+					console.warn(
+						`[Sync Job ${syncJob.id}] Alerts detected:`,
+						alerts.map((a) => a.message).join("; ")
+					);
+				}
+			})
+			.catch((error) => {
+				console.warn(
+					`[Sync Job ${syncJob.id}] Failed to check alerts:`,
+					error instanceof Error ? error.message : String(error)
+				);
+			});
 
 		// Update sync job with results
 		// Try to update with new fields first (after migration)

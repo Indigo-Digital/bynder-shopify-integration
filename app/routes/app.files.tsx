@@ -125,7 +125,7 @@ export default function FilesPage() {
 		const tagSet = new Set<string>();
 		syncedAssets.forEach((asset) => {
 			if (asset.fileDetails?.bynderMetadata?.tags) {
-				asset.fileDetails.bynderMetadata.tags.forEach((tag) => tagSet.add(tag));
+				asset.fileDetails.bynderMetadata.tags.forEach((tag: string) => tagSet.add(tag));
 			}
 		});
 		return Array.from(tagSet).sort();
@@ -147,7 +147,7 @@ export default function FilesPage() {
 				const query = searchQuery.toLowerCase();
 				const matchesId = asset.bynderAssetId.toLowerCase().includes(query);
 				const matchesTags =
-					asset.fileDetails?.bynderMetadata?.tags?.some((tag) =>
+					asset.fileDetails?.bynderMetadata?.tags?.some((tag: string) =>
 						tag.toLowerCase().includes(query)
 					) || false;
 				if (!matchesId && !matchesTags) {
@@ -654,9 +654,9 @@ export default function FilesPage() {
 																gap: "0.25rem",
 															}}
 														>
-															{tags.slice(0, 3).map((tag) => (
-																<span
-																	key={tag}
+														{tags.slice(0, 3).map((tag: string) => (
+															<span
+																key={tag}
 																	style={{
 																		backgroundColor: "#e5e7eb",
 																		color: "#374151",

@@ -115,11 +115,15 @@ export default function FilesPage() {
 
 	const handleAssetSelect = async (assetId: string) => {
 		setShowPicker(false); // Close modal immediately
+
+		// URL encode the asset ID to handle special characters
+		const encodedAssetId = encodeURIComponent(assetId);
+
 		fetcher.submit(
 			{ assetId },
 			{
 				method: "POST",
-				action: `/api/sync?assetId=${assetId}`,
+				action: `/api/sync?assetId=${encodedAssetId}`,
 			}
 		);
 	};

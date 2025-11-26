@@ -83,9 +83,36 @@ export function BynderPicker({
 							editable: false, // Limit to single portal
 						},
 						language: "en_US",
-						onSuccess: (assets: Array<{ id: string }>) => {
+						onSuccess: (
+							assets: Array<{ id?: string; [key: string]: unknown }>
+						) => {
 							if (assets && assets.length > 0 && assets[0]) {
-								onAssetSelect(assets[0].id);
+								const asset = assets[0];
+
+								// Extract asset ID - UCV returns the ID directly in the id property
+								// The ID might be base64 encoded or in a different format
+								let assetId: string | undefined = asset.id;
+
+								// Also check for alternative ID properties
+								if (!assetId) {
+									assetId =
+										(typeof asset.databaseId === "string"
+											? asset.databaseId
+											: undefined) ||
+										(typeof asset.mediaId === "string"
+											? asset.mediaId
+											: undefined);
+								}
+
+								if (!assetId) {
+									console.error("No asset ID found in UCV response:", asset);
+									setError("Failed to extract asset ID from selection");
+									return;
+								}
+
+								// The asset ID from UCV should be used as-is
+								// The Bynder SDK will handle URL encoding if needed
+								onAssetSelect(assetId);
 								if (autoClose && onClose) {
 									onClose();
 								}

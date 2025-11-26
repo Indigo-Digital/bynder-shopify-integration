@@ -18,7 +18,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const { session, admin } = await authenticate.admin(request);
 		const shop = session.shop;
 		const url = new URL(request.url);
-		const assetId = url.searchParams.get("assetId");
+		let assetId: string | null = url.searchParams.get("assetId");
+
+		// Decode the asset ID if it was URL encoded
+		if (assetId) {
+			assetId = decodeURIComponent(assetId);
+
+			// If the asset ID looks like base64, try to decode it
+			// Bynder asset IDs are typically UUIDs, so if we get a long base64 string,
+			// it might need decoding
+			if (assetId.length > 30 && /^[A-Za-z0-9+/=]+$/.test(assetId)) {
+				try {
+					const decoded = Buffer.from(assetId, "base64").toString("utf-8");
+					// Check if decoded value looks like a Bynder ID (UUID pattern or alphanumeric)
+					// Bynder IDs are typically UUIDs like: 4BFD3C8F-7ACC-4D1E-98A2-7BFDDC6C511E
+					if (decoded.match(/^[A-Za-z0-9_-]+$/) && decoded.length < 100) {
+						// Extract UUID if it's wrapped in text like "(Asset_id UUID)"
+						const uuidMatch = decoded.match(
+							/([A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12})/i
+						);
+						if (uuidMatch && uuidMatch[1]) {
+							assetId = uuidMatch[1];
+						} else if (
+							decoded.match(
+								/^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i
+							)
+						) {
+							// Already a UUID
+							assetId = decoded;
+						}
+					}
+				} catch {
+					// Not base64 or decode failed, use original ID
+				}
+			}
+		}
 
 		// Get shop configuration
 		const shopConfig = await prisma.shop.findUnique({
@@ -49,24 +83,60 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		}
 
 		if (assetId) {
+			// Log the asset ID for debugging
+			console.log("Syncing asset with ID:", assetId);
+
 			// Sync single asset - keep synchronous for quick operations
-			const { fileId, fileUrl } = await uploadBynderAsset(
-				admin,
-				bynderClient,
-				assetId,
-				shopConfig.id,
-				"manual",
-				{
-					fileFolderTemplate: shopConfig.fileFolderTemplate,
-					filenamePrefix: shopConfig.filenamePrefix,
-					filenameSuffix: shopConfig.filenameSuffix,
-					altTextPrefix: shopConfig.altTextPrefix,
-					syncTags: shopConfig.syncTags,
+			let fileId: string;
+			let fileUrl: string;
+
+			try {
+				const result = await uploadBynderAsset(
+					admin,
+					bynderClient,
+					assetId,
+					shopConfig.id,
+					"manual",
+					{
+						fileFolderTemplate: shopConfig.fileFolderTemplate,
+						filenamePrefix: shopConfig.filenamePrefix,
+						filenameSuffix: shopConfig.filenameSuffix,
+						altTextPrefix: shopConfig.altTextPrefix,
+						syncTags: shopConfig.syncTags,
+					}
+				);
+				fileId = result.fileId;
+				fileUrl = result.fileUrl;
+			} catch (error) {
+				console.error("Error uploading asset:", error);
+				// Provide more detailed error message
+				const errorMessage =
+					error instanceof Error ? error.message : String(error);
+				if (
+					errorMessage.includes("404") ||
+					errorMessage.includes("Not Found")
+				) {
+					return Response.json(
+						{
+							error: `Asset not found. The asset ID "${assetId}" may be invalid or in an incorrect format. Please try selecting the asset again.`,
+						},
+						{ status: 404 }
+					);
 				}
-			);
+				throw error;
+			}
 
 			// Update or create synced asset record
-			const assetInfo = await bynderClient.getMediaInfo({ id: assetId });
+			let assetInfo: Awaited<
+				ReturnType<typeof bynderClient.getMediaInfo>
+			> | null = null;
+			try {
+				assetInfo = await bynderClient.getMediaInfo({ id: assetId });
+			} catch (error) {
+				console.error("Error fetching asset info:", error);
+				// Continue without asset info - we already have the file uploaded
+				assetInfo = null;
+			}
 			const bynderAsset =
 				assetInfo && typeof assetInfo === "object" && "id" in assetInfo
 					? (assetInfo as { tags?: string[]; version?: number })

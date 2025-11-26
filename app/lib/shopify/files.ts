@@ -3,33 +3,8 @@ import FormData from "form-data";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
 import type { AdminApi } from "../types.js";
+import { generateFilePath, type TemplateContext } from "./file-template.js";
 import { setBynderMetafields } from "./metafields.js";
-
-/**
- * Sanitize tag for use in file path
- */
-function sanitizeTag(tag: string): string {
-	return tag
-		.toLowerCase()
-		.replace(/[^a-z0-9-]/g, "-")
-		.replace(/-+/g, "-")
-		.replace(/^-|-$/g, "");
-}
-
-/**
- * Generate file name with campaigns/{tag}/{filename} convention
- */
-function generateFileName(
-	originalFilename: string,
-	tags: string[],
-	defaultTag = "shopify-sync"
-): string {
-	// Use first tag that's not the default, or default if none found
-	const primaryTag =
-		tags.find((tag) => tag !== defaultTag && tag.trim() !== "") || defaultTag;
-	const sanitizedTag = sanitizeTag(primaryTag);
-	return `campaigns/${sanitizedTag}/${originalFilename}`;
-}
 
 /**
  * Download file from URL and return as buffer
@@ -103,7 +78,14 @@ export async function uploadBynderAsset(
 	bynderClient: BynderClient,
 	assetId: string,
 	_shopId: string,
-	_syncType: "auto" | "manual" = "manual"
+	_syncType: "auto" | "manual" = "manual",
+	shopConfig?: {
+		fileFolderTemplate?: string | null;
+		filenamePrefix?: string | null;
+		filenameSuffix?: string | null;
+		altTextPrefix?: string | null;
+		syncTags?: string;
+	}
 ): Promise<{ fileId: string; fileUrl: string }> {
 	// Get asset info from Bynder
 	const assetInfoRaw = await bynderClient.getMediaInfo({ id: assetId });
@@ -184,9 +166,29 @@ export async function uploadBynderAsset(
 		throw new Error(`Failed to download asset ${assetId}: ${errorMessage}`);
 	}
 
-	// Generate file name with naming convention
+	// Generate file path using template system
 	const originalFilename = assetInfo.name || `bynder-${assetId}`;
-	const fileName = generateFileName(originalFilename, assetInfo.tags || []);
+
+	// Parse sync tags for template context
+	const syncTags = shopConfig?.syncTags
+		? shopConfig.syncTags
+				.split(",")
+				.map((tag) => tag.trim())
+				.filter((tag) => tag.length > 0)
+		: ["shopify-sync"];
+
+	const templateContext: TemplateContext = {
+		asset: assetInfo,
+		syncTags,
+	};
+
+	const fileName = generateFilePath(
+		shopConfig?.fileFolderTemplate,
+		originalFilename,
+		templateContext,
+		shopConfig?.filenamePrefix,
+		shopConfig?.filenameSuffix
+	);
 
 	// Extract just the filename (without path) for staged upload
 	// Shopify's stagedUploadsCreate expects only a filename, not a path
@@ -729,7 +731,9 @@ export async function uploadBynderAsset(
 					{
 						originalSource: stagedTarget.resourceUrl,
 						filename: fileName,
-						alt: assetInfo.description || assetInfo.name,
+						alt: shopConfig?.altTextPrefix
+							? `${shopConfig.altTextPrefix} ${assetInfo.description || assetInfo.name}`.trim()
+							: assetInfo.description || assetInfo.name,
 					},
 				],
 			},

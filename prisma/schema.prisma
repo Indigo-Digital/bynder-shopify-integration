@@ -38,6 +38,10 @@ model Shop {
   shop              String   @unique
   bynderBaseUrl     String?
   syncTags          String   @default("shopify-sync")
+  fileFolderTemplate String? // Template for folder path (e.g., "bynder/{tag}/{dateCreated:YYYY}")
+  filenamePrefix    String? // Prefix for filenames (e.g., "[Bynder]", "BYNDER_")
+  filenameSuffix    String? // Suffix for filenames (e.g., "_bynder")
+  altTextPrefix     String? // Prefix for alt text (e.g., "[Bynder]")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

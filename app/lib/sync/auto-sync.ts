@@ -183,7 +183,14 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 						bynderClient,
 						asset.id,
 						shopId,
-						"auto"
+						"auto",
+						{
+							fileFolderTemplate: shop.fileFolderTemplate,
+							filenamePrefix: shop.filenamePrefix,
+							filenameSuffix: shop.filenameSuffix,
+							altTextPrefix: shop.altTextPrefix,
+							syncTags: shop.syncTags,
+						}
 					);
 
 					// Update or create synced asset record

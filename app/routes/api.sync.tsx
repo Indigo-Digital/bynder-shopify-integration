@@ -55,7 +55,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 				bynderClient,
 				assetId,
 				shopConfig.id,
-				"manual"
+				"manual",
+				{
+					fileFolderTemplate: shopConfig.fileFolderTemplate,
+					filenamePrefix: shopConfig.filenamePrefix,
+					filenameSuffix: shopConfig.filenameSuffix,
+					altTextPrefix: shopConfig.altTextPrefix,
+					syncTags: shopConfig.syncTags,
+				}
 			);
 
 			// Update or create synced asset record

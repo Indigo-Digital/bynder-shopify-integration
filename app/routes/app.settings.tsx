@@ -4,6 +4,10 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { redirect, useFetcher, useLoaderData } from "react-router";
 import { AssetBrowser } from "../components/AssetBrowser.js";
 import prisma from "../db.server.js";
+import {
+	processFileFolderTemplate,
+	type TemplateContext,
+} from "../lib/shopify/file-template.js";
 import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -141,6 +145,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		return redirect("/app/settings?updated=true");
 	}
 
+	if (intent === "update_file_organization") {
+		const fileFolderTemplate =
+			formData.get("fileFolderTemplate")?.toString() || null;
+		const filenamePrefix = formData.get("filenamePrefix")?.toString() || null;
+		const filenameSuffix = formData.get("filenameSuffix")?.toString() || null;
+		const altTextPrefix = formData.get("altTextPrefix")?.toString() || null;
+
+		await prisma.shop.upsert({
+			where: { shop },
+			create: {
+				shop,
+				fileFolderTemplate,
+				filenamePrefix,
+				filenameSuffix,
+				altTextPrefix,
+			},
+			update: {
+				fileFolderTemplate,
+				filenamePrefix,
+				filenameSuffix,
+				altTextPrefix,
+			},
+		});
+
+		return redirect("/app/settings?updated=true");
+	}
+
 	return { error: "Invalid intent" };
 };
 
@@ -158,6 +189,18 @@ export default function SettingsPage() {
 	);
 	const [newTag, setNewTag] = useState("");
 	const [activeTab, setActiveTab] = useState<"config" | "browse">("config");
+	const [fileFolderTemplate, setFileFolderTemplate] = useState(
+		shopConfig?.fileFolderTemplate || "bynder/{tag}"
+	);
+	const [filenamePrefix, setFilenamePrefix] = useState(
+		shopConfig?.filenamePrefix || ""
+	);
+	const [filenameSuffix, setFilenameSuffix] = useState(
+		shopConfig?.filenameSuffix || ""
+	);
+	const [altTextPrefix, setAltTextPrefix] = useState(
+		shopConfig?.altTextPrefix || "[Bynder]"
+	);
 
 	const isSubmitting = fetcher.state !== "idle";
 	const isTesting = testFetcher.state !== "idle";
@@ -208,6 +251,18 @@ export default function SettingsPage() {
 		}
 		if (shopConfig?.bynderBaseUrl) {
 			setBynderBaseUrl(shopConfig.bynderBaseUrl);
+		}
+		if (shopConfig?.fileFolderTemplate !== undefined) {
+			setFileFolderTemplate(shopConfig.fileFolderTemplate || "bynder/{tag}");
+		}
+		if (shopConfig?.filenamePrefix !== undefined) {
+			setFilenamePrefix(shopConfig.filenamePrefix || "");
+		}
+		if (shopConfig?.filenameSuffix !== undefined) {
+			setFilenameSuffix(shopConfig.filenameSuffix || "");
+		}
+		if (shopConfig?.altTextPrefix !== undefined) {
+			setAltTextPrefix(shopConfig.altTextPrefix || "[Bynder]");
 		}
 	}, [shopConfig]);
 
@@ -284,6 +339,147 @@ export default function SettingsPage() {
 						</s-stack>
 					)}
 				</s-stack>
+			</s-section>
+
+			{/* File Organization Settings */}
+			<s-section heading="File Organization Settings">
+				<fetcher.Form method="POST">
+					<input type="hidden" name="intent" value="update_file_organization" />
+					<input
+						type="hidden"
+						name="fileFolderTemplate"
+						value={fileFolderTemplate}
+					/>
+					<input type="hidden" name="filenamePrefix" value={filenamePrefix} />
+					<input type="hidden" name="filenameSuffix" value={filenameSuffix} />
+					<input type="hidden" name="altTextPrefix" value={altTextPrefix} />
+					<s-stack direction="block" gap="base">
+						<s-paragraph>
+							Configure how Bynder assets are organized in Shopify Files. Use
+							templates to organize files by tags, dates, and other metadata.
+						</s-paragraph>
+
+						{/* Folder Template */}
+						<s-stack direction="block" gap="base">
+							<s-text-field
+								label="Folder Template"
+								value={fileFolderTemplate}
+								onChange={(e) => {
+									const target = e.currentTarget;
+									if (target) {
+										setFileFolderTemplate(target.value);
+									}
+								}}
+								placeholder="bynder/{tag}/{dateCreated:YYYY}"
+							/>
+							<s-text>
+								Template for folder structure. Available placeholders:{" "}
+								<code>{`{tag}`}</code>, <code>{`{dateCreated:YYYY}`}</code>,{" "}
+								<code>{`{dateCreated:MM}`}</code>,{" "}
+								<code>{`{dateCreated:DD}`}</code>,{" "}
+								<code>{`{dateModified:YYYY}`}</code>,{" "}
+								<code>{`{dateModified:MM}`}</code>,{" "}
+								<code>{`{dateModified:DD}`}</code>, <code>{`{name}`}</code>,{" "}
+								<code>{`{type}`}</code>
+							</s-text>
+							{/* Preview */}
+							{fileFolderTemplate && (
+								<s-box padding="base" borderWidth="base" borderRadius="base">
+									<s-text>
+										<strong>Preview:</strong> {(() => {
+											try {
+												const sampleContext: TemplateContext = {
+													asset: {
+														id: "sample",
+														name: "product-image",
+														type: "image",
+														tags:
+															tagList.length > 0
+																? [tagList[0] || "summer-2024"]
+																: ["summer-2024"],
+														dateCreated: new Date().toISOString(),
+														dateModified: new Date().toISOString(),
+														version: 1,
+														derivatives: {},
+														thumbnails: {},
+														files: [],
+													},
+													syncTags:
+														tagList.length > 0 ? tagList : ["summer-2024"],
+												};
+												const preview = processFileFolderTemplate(
+													fileFolderTemplate,
+													sampleContext
+												);
+												return `${preview}/product-image.jpg`;
+											} catch {
+												return "Invalid template";
+											}
+										})()}
+									</s-text>
+								</s-box>
+							)}
+						</s-stack>
+
+						{/* Filename Prefix */}
+						<s-stack direction="block" gap="base">
+							<s-text-field
+								label="Filename Prefix (optional)"
+								value={filenamePrefix}
+								onChange={(e) => {
+									const target = e.currentTarget;
+									if (target) {
+										setFilenamePrefix(target.value);
+									}
+								}}
+								placeholder="[Bynder]"
+							/>
+							<s-text>
+								Prefix to add to filenames (e.g., '[Bynder]' or 'BYNDER_')
+							</s-text>
+						</s-stack>
+
+						{/* Filename Suffix */}
+						<s-stack direction="block" gap="base">
+							<s-text-field
+								label="Filename Suffix (optional)"
+								value={filenameSuffix}
+								onChange={(e) => {
+									const target = e.currentTarget;
+									if (target) {
+										setFilenameSuffix(target.value);
+									}
+								}}
+								placeholder="_bynder"
+							/>
+							<s-text>
+								Suffix to add to filenames (e.g., '_bynder' or '-bynder')
+							</s-text>
+						</s-stack>
+
+						{/* Alt Text Prefix */}
+						<s-stack direction="block" gap="base">
+							<s-text-field
+								label="Alt Text Prefix (optional)"
+								value={altTextPrefix}
+								onChange={(e) => {
+									const target = e.currentTarget;
+									if (target) {
+										setAltTextPrefix(target.value);
+									}
+								}}
+								placeholder="[Bynder]"
+							/>
+							<s-text>
+								Prefix to add to alt text for accessibility (e.g., '[Bynder]')
+							</s-text>
+						</s-stack>
+
+						<s-button type="submit" disabled={isSubmitting}>
+							{isSubmitting ? "Saving..." : "Save File Organization Settings"}
+						</s-button>
+					</s-stack>
+				</fetcher.Form>
 			</s-section>
 
 			{/* Stats Section */}

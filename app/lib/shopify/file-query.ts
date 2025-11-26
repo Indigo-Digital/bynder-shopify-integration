@@ -108,12 +108,9 @@ export async function getShopifyFileDetails(
 					bynderMetadata = {
 						assetId: metafieldMap.asset_id || "",
 						permalink: metafieldMap.permalink || "",
-						tags: metafieldMap.tags
-							? JSON.parse(metafieldMap.tags)
-							: [],
+						tags: metafieldMap.tags ? JSON.parse(metafieldMap.tags) : [],
 						version: parseInt(metafieldMap.version || "0", 10),
-						syncedAt:
-							metafieldMap.synced_at || new Date().toISOString(),
+						syncedAt: metafieldMap.synced_at || new Date().toISOString(),
 					};
 				}
 			}
@@ -168,4 +165,3 @@ export async function getShopifyFileDetail(
 	const results = await getShopifyFileDetails(admin, [fileId]);
 	return results.get(fileId) || null;
 }
-

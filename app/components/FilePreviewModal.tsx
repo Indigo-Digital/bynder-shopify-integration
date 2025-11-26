@@ -187,6 +187,8 @@ export function FilePreviewModal({
 									stroke="currentColor"
 									strokeWidth="2"
 									style={{ color: "#6b7280" }}
+									role="img"
+									aria-label="File icon"
 								>
 									<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
 									<polyline points="14 2 14 8 20 8" />
@@ -242,9 +244,7 @@ export function FilePreviewModal({
 							<strong style={{ color: "#374151", display: "block" }}>
 								Sync Type
 							</strong>
-							<span style={{ color: "#6b7280" }}>
-								{syncedAsset.syncType}
-							</span>
+							<span style={{ color: "#6b7280" }}>{syncedAsset.syncType}</span>
 						</div>
 
 						{version !== null && (
@@ -370,4 +370,3 @@ export function FilePreviewModal({
 		</div>
 	);
 }
-

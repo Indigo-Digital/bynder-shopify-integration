@@ -1,12 +1,17 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useNavigate, useSearchParams } from "react-router";
+import {
+	useFetcher,
+	useLoaderData,
+	useNavigate,
+	useSearchParams,
+} from "react-router";
 import { BynderPicker } from "../components/BynderPicker.js";
 import { FilePreviewModal } from "../components/FilePreviewModal.js";
+import prisma from "../db.server.js";
 import type { ShopifyFileDetails } from "../lib/shopify/file-query.js";
 import { getShopifyFileDetails } from "../lib/shopify/file-query.js";
-import prisma from "../db.server.js";
 import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -20,7 +25,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	// Parse query params for pagination and filtering
 	const url = new URL(request.url);
 	const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
-	const limit = Math.min(100, Math.max(10, parseInt(url.searchParams.get("limit") || "50", 10)));
+	const limit = Math.min(
+		100,
+		Math.max(10, parseInt(url.searchParams.get("limit") || "50", 10))
+	);
 	const skip = (page - 1) * limit;
 
 	// Get synced assets with pagination
@@ -80,7 +88,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function FilesPage() {
-	const { shopConfig, syncedAssets, shop, pagination } = useLoaderData<typeof loader>();
+	const { shopConfig, syncedAssets, shop, pagination } =
+		useLoaderData<typeof loader>();
 	const [showPicker, setShowPicker] = useState(false);
 	const [previewAsset, setPreviewAsset] = useState<{
 		asset: (typeof syncedAssets)[number];
@@ -125,7 +134,9 @@ export default function FilesPage() {
 		const tagSet = new Set<string>();
 		syncedAssets.forEach((asset) => {
 			if (asset.fileDetails?.bynderMetadata?.tags) {
-				asset.fileDetails.bynderMetadata.tags.forEach((tag: string) => tagSet.add(tag));
+				asset.fileDetails.bynderMetadata.tags.forEach((tag: string) => {
+					tagSet.add(tag);
+				});
 			}
 		});
 		return Array.from(tagSet).sort();
@@ -496,7 +507,13 @@ export default function FilesPage() {
 
 				{/* Results count */}
 				{syncedAssets.length > 0 && (
-					<div style={{ marginBottom: "1rem", color: "#6b7280", fontSize: "0.875rem" }}>
+					<div
+						style={{
+							marginBottom: "1rem",
+							color: "#6b7280",
+							fontSize: "0.875rem",
+						}}
+					>
 						Showing {filteredAssets.length} of {pagination.total} assets
 					</div>
 				)}
@@ -585,142 +602,163 @@ export default function FilesPage() {
 									</tr>
 								</thead>
 								<tbody>
-									{filteredAssets.map((asset: (typeof syncedAssets)[number]) => {
-										const fileDetails = asset.fileDetails;
-										const thumbnailUrl = fileDetails?.thumbnailUrl;
-										const tags = fileDetails?.bynderMetadata?.tags || [];
+									{filteredAssets.map(
+										(asset: (typeof syncedAssets)[number]) => {
+											const fileDetails = asset.fileDetails;
+											const thumbnailUrl = fileDetails?.thumbnailUrl;
+											const tags = fileDetails?.bynderMetadata?.tags || [];
 
-										return (
-											<tr
-												key={asset.id}
-												style={{
-													borderBottom: "1px solid #e5e7eb",
-													cursor: fileDetails ? "pointer" : "default",
-												}}
-												onClick={() => fileDetails && handlePreview(asset)}
-											>
-												<td style={{ padding: "0.75rem" }}>
-													{thumbnailUrl ? (
-														<img
-															src={thumbnailUrl}
-															alt={fileDetails?.altText || "Preview"}
-															style={{
-																width: "60px",
-																height: "60px",
-																objectFit: "cover",
-																borderRadius: "4px",
-																border: "1px solid #e5e7eb",
-															}}
-														/>
-													) : (
-														<div
-															style={{
-																width: "60px",
-																height: "60px",
-																backgroundColor: "#f3f4f6",
-																borderRadius: "4px",
-																display: "flex",
-																alignItems: "center",
-																justifyContent: "center",
-																border: "1px solid #e5e7eb",
-															}}
-														>
-															<svg
-																width="24"
-																height="24"
-																viewBox="0 0 24 24"
-																fill="none"
-																stroke="currentColor"
-																strokeWidth="2"
-																style={{ color: "#9ca3af" }}
+											return (
+												<tr
+													key={asset.id}
+													style={{
+														borderBottom: "1px solid #e5e7eb",
+														cursor: fileDetails ? "pointer" : "default",
+													}}
+													onClick={() => fileDetails && handlePreview(asset)}
+												>
+													<td style={{ padding: "0.75rem" }}>
+														{thumbnailUrl ? (
+															<img
+																src={thumbnailUrl}
+																alt={fileDetails?.altText || "Preview"}
+																style={{
+																	width: "60px",
+																	height: "60px",
+																	objectFit: "cover",
+																	borderRadius: "4px",
+																	border: "1px solid #e5e7eb",
+																}}
+															/>
+														) : (
+															<div
+																style={{
+																	width: "60px",
+																	height: "60px",
+																	backgroundColor: "#f3f4f6",
+																	borderRadius: "4px",
+																	display: "flex",
+																	alignItems: "center",
+																	justifyContent: "center",
+																	border: "1px solid #e5e7eb",
+																}}
 															>
-																<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-																<polyline points="14 2 14 8 20 8" />
-															</svg>
-														</div>
-													)}
-												</td>
-												<td style={{ padding: "0.75rem" }}>
-													<span style={{ fontFamily: "monospace", fontSize: "0.875rem" }}>
-														{asset.bynderAssetId}
-													</span>
-												</td>
-												<td style={{ padding: "0.75rem" }}>
-													{tags.length > 0 ? (
-														<div
-															style={{
-																display: "flex",
-																flexWrap: "wrap",
-																gap: "0.25rem",
-															}}
-														>
-														{tags.slice(0, 3).map((tag: string) => (
-															<span
-																key={tag}
-																	style={{
-																		backgroundColor: "#e5e7eb",
-																		color: "#374151",
-																		padding: "0.125rem 0.5rem",
-																		borderRadius: "9999px",
-																		fontSize: "0.75rem",
-																	}}
+																<svg
+																	width="24"
+																	height="24"
+																	viewBox="0 0 24 24"
+																	fill="none"
+																	stroke="currentColor"
+																	strokeWidth="2"
+																	style={{ color: "#9ca3af" }}
+																	role="img"
+																	aria-label="File icon"
 																>
-																	{tag}
-																</span>
-															))}
-															{tags.length > 3 && (
-																<span
-																	style={{
-																		color: "#6b7280",
-																		fontSize: "0.75rem",
-																	}}
-																>
-																	+{tags.length - 3}
-																</span>
-															)}
-														</div>
-													) : (
-														<span style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
-															No tags
-														</span>
-													)}
-												</td>
-												<td style={{ padding: "0.75rem" }}>
-													<span style={{ fontSize: "0.875rem" }}>{asset.syncType}</span>
-												</td>
-												<td style={{ padding: "0.75rem" }}>
-													<span style={{ fontSize: "0.875rem" }}>
-														{new Date(asset.syncedAt).toLocaleString()}
-													</span>
-												</td>
-												<td style={{ padding: "0.75rem" }}>
-													{fileDetails ? (
-														<button
-															type="button"
-															onClick={(e) => {
-																e.stopPropagation();
-																handlePreview(asset);
-															}}
+																	<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+																	<polyline points="14 2 14 8 20 8" />
+																</svg>
+															</div>
+														)}
+													</td>
+													<td style={{ padding: "0.75rem" }}>
+														<span
 															style={{
-																background: "none",
-																border: "none",
-																color: "#2563eb",
-																cursor: "pointer",
-																textDecoration: "underline",
+																fontFamily: "monospace",
 																fontSize: "0.875rem",
 															}}
 														>
-															Preview
-														</button>
-													) : (
-														<span style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
-															No details
+															{asset.bynderAssetId}
 														</span>
-													)}
-												</td>
-											</tr>
-										);
-									})}
+													</td>
+													<td style={{ padding: "0.75rem" }}>
+														{tags.length > 0 ? (
+															<div
+																style={{
+																	display: "flex",
+																	flexWrap: "wrap",
+																	gap: "0.25rem",
+																}}
+															>
+																{tags.slice(0, 3).map((tag: string) => (
+																	<span
+																		key={tag}
+																		style={{
+																			backgroundColor: "#e5e7eb",
+																			color: "#374151",
+																			padding: "0.125rem 0.5rem",
+																			borderRadius: "9999px",
+																			fontSize: "0.75rem",
+																		}}
+																	>
+																		{tag}
+																	</span>
+																))}
+																{tags.length > 3 && (
+																	<span
+																		style={{
+																			color: "#6b7280",
+																			fontSize: "0.75rem",
+																		}}
+																	>
+																		+{tags.length - 3}
+																	</span>
+																)}
+															</div>
+														) : (
+															<span
+																style={{
+																	color: "#9ca3af",
+																	fontSize: "0.875rem",
+																}}
+															>
+																No tags
+															</span>
+														)}
+													</td>
+													<td style={{ padding: "0.75rem" }}>
+														<span style={{ fontSize: "0.875rem" }}>
+															{asset.syncType}
+														</span>
+													</td>
+													<td style={{ padding: "0.75rem" }}>
+														<span style={{ fontSize: "0.875rem" }}>
+															{new Date(asset.syncedAt).toLocaleString()}
+														</span>
+													</td>
+													<td style={{ padding: "0.75rem" }}>
+														{fileDetails ? (
+															<button
+																type="button"
+																onClick={(e) => {
+																	e.stopPropagation();
+																	handlePreview(asset);
+																}}
+																style={{
+																	background: "none",
+																	border: "none",
+																	color: "#2563eb",
+																	cursor: "pointer",
+																	textDecoration: "underline",
+																	fontSize: "0.875rem",
+																}}
+															>
+																Preview
+															</button>
+														) : (
+															<span
+																style={{
+																	color: "#9ca3af",
+																	fontSize: "0.875rem",
+																}}
+															>
+																No details
+															</span>
+														)}
+													</td>
+												</tr>
+											);
+										}
+									)}
 								</tbody>
 							</table>
 						</div>
@@ -738,7 +776,8 @@ export default function FilesPage() {
 								}}
 							>
 								<div style={{ color: "#6b7280", fontSize: "0.875rem" }}>
-									Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+									Page {pagination.page} of {pagination.totalPages} (
+									{pagination.total} total)
 								</div>
 								<div style={{ display: "flex", gap: "0.5rem" }}>
 									<button
@@ -749,7 +788,8 @@ export default function FilesPage() {
 											padding: "0.5rem 1rem",
 											border: "1px solid #d1d5db",
 											borderRadius: "6px",
-											backgroundColor: pagination.page <= 1 ? "#f9fafb" : "white",
+											backgroundColor:
+												pagination.page <= 1 ? "#f9fafb" : "white",
 											color: pagination.page <= 1 ? "#9ca3af" : "#374151",
 											cursor: pagination.page <= 1 ? "not-allowed" : "pointer",
 											fontSize: "0.875rem",
@@ -766,11 +806,17 @@ export default function FilesPage() {
 											border: "1px solid #d1d5db",
 											borderRadius: "6px",
 											backgroundColor:
-												pagination.page >= pagination.totalPages ? "#f9fafb" : "white",
+												pagination.page >= pagination.totalPages
+													? "#f9fafb"
+													: "white",
 											color:
-												pagination.page >= pagination.totalPages ? "#9ca3af" : "#374151",
+												pagination.page >= pagination.totalPages
+													? "#9ca3af"
+													: "#374151",
 											cursor:
-												pagination.page >= pagination.totalPages ? "not-allowed" : "pointer",
+												pagination.page >= pagination.totalPages
+													? "not-allowed"
+													: "pointer",
 											fontSize: "0.875rem",
 										}}
 									>

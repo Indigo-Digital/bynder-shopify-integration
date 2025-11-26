@@ -133,11 +133,7 @@ export async function getShopAlerts(
 	const allAlerts: AlertCheckResult[] = [];
 
 	for (const job of recentJobs) {
-		const jobAlerts = await checkSyncJobAlerts(
-			shopId,
-			job.id,
-			conditions
-		);
+		const jobAlerts = await checkSyncJobAlerts(shopId, job.id, conditions);
 		allAlerts.push(...jobAlerts);
 	}
 
@@ -151,4 +147,3 @@ export async function getShopAlerts(
 
 	return Array.from(uniqueAlerts.values());
 }
-

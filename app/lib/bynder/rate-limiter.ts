@@ -13,11 +13,9 @@ export class RateLimiter {
 	private readonly maxTokens: number;
 	private readonly refillRate: number; // tokens per second
 	private lastRefill: number;
-	private readonly burstCapacity: number;
 	private rateLimitHits = 0;
 
 	constructor(config: RateLimiterConfig) {
-		this.burstCapacity = config.burstCapacity;
 		this.maxTokens = config.burstCapacity;
 		this.tokens = config.burstCapacity;
 		this.refillRate = config.requestsPerSecond;
@@ -92,14 +90,8 @@ export class RateLimiter {
  * Create a rate limiter instance from environment variables
  */
 export function createRateLimiter(): RateLimiter {
-	const rps = parseInt(
-		process.env.BYNDER_RATE_LIMIT_RPS || "10",
-		10
-	);
-	const burst = parseInt(
-		process.env.BYNDER_RATE_LIMIT_BURST || "20",
-		10
-	);
+	const rps = parseInt(process.env.BYNDER_RATE_LIMIT_RPS || "10", 10);
+	const burst = parseInt(process.env.BYNDER_RATE_LIMIT_BURST || "20", 10);
 
 	return new RateLimiter({
 		requestsPerSecond: rps,
@@ -121,4 +113,3 @@ export function getRateLimiter(): RateLimiter {
 	}
 	return globalRateLimiter;
 }
-

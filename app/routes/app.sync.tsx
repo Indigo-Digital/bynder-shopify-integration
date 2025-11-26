@@ -222,15 +222,13 @@ export default function SyncDashboard() {
 				</s-banner>
 			)}
 			{/* Display alerts */}
-			{alerts && alerts.length > 0 && (
-				<>
-					{alerts.map((alert, index) => (
-						<s-banner key={index} tone={alert.severity}>
-							{alert.message}
-						</s-banner>
-					))}
-				</>
-			)}
+			{alerts &&
+				alerts.length > 0 &&
+				alerts.map((alert) => (
+					<s-banner key={alert.message} tone={alert.severity}>
+						{alert.message}
+					</s-banner>
+				))}
 
 			{syncResult && showSuccess && (
 				<s-banner
@@ -321,7 +319,11 @@ export default function SyncDashboard() {
 				{metricsSummary && (
 					<div style={{ marginTop: "1rem" }}>
 						<s-heading level={3}>Performance Metrics (Last 10 Jobs)</s-heading>
-						<s-stack direction="inline" gap="base" style={{ marginTop: "0.5rem" }}>
+						<s-stack
+							direction="inline"
+							gap="base"
+							style={{ marginTop: "0.5rem" }}
+						>
 							<s-box padding="base" borderWidth="base" borderRadius="base">
 								<s-text>Avg Sync Duration</s-text>
 								<s-heading>

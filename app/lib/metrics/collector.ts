@@ -3,12 +3,7 @@
  */
 
 import prisma from "../../db.server.js";
-import type {
-	MetricMetadata,
-	MetricName,
-	MetricRecord,
-	MetricType,
-} from "./types.js";
+import type { MetricMetadata, MetricName, MetricRecord } from "./types.js";
 
 /**
  * Check if metrics collection is enabled
@@ -20,9 +15,7 @@ function isMetricsEnabled(): boolean {
 /**
  * Record a metric
  */
-export async function recordMetric(
-	record: MetricRecord
-): Promise<void> {
+export async function recordMetric(record: MetricRecord): Promise<void> {
 	if (!isMetricsEnabled()) {
 		return;
 	}
@@ -35,9 +28,7 @@ export async function recordMetric(
 				metricType: record.metricType,
 				metricName: record.metricName,
 				value: record.value,
-				metadata: record.metadata
-					? JSON.stringify(record.metadata)
-					: null,
+				metadata: record.metadata ? JSON.stringify(record.metadata) : null,
 			},
 		});
 	} catch (error) {
@@ -169,4 +160,3 @@ export async function cleanupOldMetrics(shopId?: string): Promise<number> {
 
 	return result.count;
 }
-

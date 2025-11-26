@@ -156,7 +156,7 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		// Helper function to process a single asset
 		const processAsset = async (
 			asset: { id: string; tags: string[]; version: number },
-			index: number
+			_index: number
 		): Promise<{
 			created: boolean;
 			updated: boolean;
@@ -228,7 +228,10 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 
 					// Update progress incrementally
 					processedCount++;
-					if (processedCount % 10 === 0 || processedCount === allAssets.length) {
+					if (
+						processedCount % 10 === 0 ||
+						processedCount === allAssets.length
+					) {
 						const elapsed = (Date.now() - syncStartTime) / 1000;
 						const throughput = processedCount / elapsed;
 						const remaining = allAssets.length - processedCount;
@@ -305,10 +308,7 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 			);
 		} catch (error) {
 			// Handle cancellation during parallel processing
-			if (
-				error instanceof Error &&
-				error.message === "JOB_CANCELLED"
-			) {
+			if (error instanceof Error && error.message === "JOB_CANCELLED") {
 				console.log(
 					`[Sync Job] Job ${syncJob.id} was cancelled during parallel processing`
 				);
@@ -462,11 +462,10 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 
 		// Calculate metrics
 		const syncDuration = (Date.now() - syncStartTime) / 1000; // seconds
-		const throughput = allAssets.length > 0 ? allAssets.length / syncDuration : 0;
+		const throughput =
+			allAssets.length > 0 ? allAssets.length / syncDuration : 0;
 		const errorRate =
-			allAssets.length > 0
-				? (errors.length / allAssets.length) * 100
-				: 0;
+			allAssets.length > 0 ? (errors.length / allAssets.length) * 100 : 0;
 
 		// Record metrics
 		await recordSyncDuration(shopId, syncDuration, syncJob.id);

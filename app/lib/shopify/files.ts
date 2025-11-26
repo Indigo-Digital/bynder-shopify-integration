@@ -719,11 +719,7 @@ export async function uploadBynderAsset(
 
 	// Step 3: Create file in Shopify using the resourceUrl
 	// Track Shopify API call
-	await recordApiCall(
-		shopId,
-		"shopify_fileCreate",
-		shopConfig?.syncJobId
-	);
+	await recordApiCall(shopId, "shopify_fileCreate", shopConfig?.syncJobId);
 	const fileCreateResponse = await admin.graphql(
 		`#graphql
       mutation fileCreate($files: [FileCreateInput!]!) {

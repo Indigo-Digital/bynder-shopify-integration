@@ -116,8 +116,7 @@ export async function getMetricsSummary(
 	// Calculate error rate trend (difference between last 2 error rates)
 	let errorRateTrend = 0;
 	if (errorRateMetrics.length >= 2) {
-		errorRateTrend =
-			errorRateMetrics[0].value - errorRateMetrics[1].value;
+		errorRateTrend = errorRateMetrics[0].value - errorRateMetrics[1].value;
 	} else if (errorRateMetrics.length === 1) {
 		errorRateTrend = errorRateMetrics[0].value;
 	}
@@ -174,4 +173,3 @@ export async function getJobMetrics(
 		errorRate: errorRateMetric?.value || 0,
 	};
 }
-

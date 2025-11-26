@@ -18,4 +18,3 @@ export interface AlertConditions {
 	slowPerformanceThreshold?: number; // Assets per second (default: 1)
 	rateLimitHitThreshold?: number; // Number of hits (default: 5)
 }
-

@@ -1,9 +1,6 @@
 import Bynder from "@bynder/bynder-js-sdk";
 import { env } from "../env.server.js";
-import {
-	recordApiCall,
-	recordRateLimitHit,
-} from "../metrics/collector.js";
+import { recordApiCall, recordRateLimitHit } from "../metrics/collector.js";
 import { getRateLimiter } from "./rate-limiter.js";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
 

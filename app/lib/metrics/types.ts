@@ -37,4 +37,3 @@ export interface MetricRecord {
 	value: number;
 	metadata?: MetricMetadata;
 }
-

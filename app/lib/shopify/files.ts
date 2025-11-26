@@ -713,13 +713,13 @@ export async function uploadBynderAsset(
 					uploadBody instanceof Buffer &&
 					Object.keys(uploadHeaders).length > 0
 				) {
-					console.log(
+					console.error(
 						`[Upload Debug] Sending request using native fetch with exact Buffer and headers`
 					);
-					console.log(
+					console.error(
 						`[Upload Debug] Content-Type header: ${uploadHeaders["Content-Type"] || uploadHeaders["content-type"] || "NOT SET - THIS WILL FAIL"}`
 					);
-					console.log(
+					console.error(
 						`[Upload Debug] Body buffer size: ${uploadBody.length} bytes`
 					);
 
@@ -741,22 +741,22 @@ export async function uploadBynderAsset(
 						fetchHeaders["Content-Length"] ||
 						fetchHeaders["content-length"]
 					) {
-						console.log(
+						console.error(
 							`[Upload Debug] WARNING: Content-Length header present from getHeaders() - this might break signature`
 						);
 					} else {
-						console.log(
+						console.error(
 							`[Upload Debug] No Content-Length header (GCS will calculate from body)`
 						);
 					}
 
-					console.log(
+					console.error(
 						`[Upload Debug] Sending POST request to: ${stagedTarget.url}`
 					);
-					console.log(
+					console.error(
 						`[Upload Debug] Final headers: ${JSON.stringify(Object.fromEntries(Object.entries(fetchHeaders).map(([k, v]) => [k, k.toLowerCase() === "content-type" ? v : typeof v === "string" && v.length > 100 ? `${v.substring(0, 100)}...` : v])), null, 2)}`
 					);
-					console.log(
+					console.error(
 						`[Upload Debug] Body size: ${bodyArray.length} bytes, type: ${bodyArray.constructor.name}`
 					);
 					const fetchResponse = await fetch(stagedTarget.url, {
@@ -766,10 +766,10 @@ export async function uploadBynderAsset(
 					});
 
 					const responseData = await fetchResponse.text();
-					console.log(
+					console.error(
 						`[Upload Debug] Response status: ${fetchResponse.status} ${fetchResponse.statusText}`
 					);
-					console.log(
+					console.error(
 						`[Upload Debug] Response headers: ${JSON.stringify(Object.fromEntries(fetchResponse.headers.entries()), null, 2)}`
 					);
 					if (responseData) {
@@ -777,7 +777,7 @@ export async function uploadBynderAsset(
 							responseData.length > 500
 								? `${responseData.substring(0, 500)}...`
 								: responseData;
-						console.log(`[Upload Debug] Response body: ${responsePreview}`);
+						console.error(`[Upload Debug] Response body: ${responsePreview}`);
 					}
 
 					uploadResponse = {

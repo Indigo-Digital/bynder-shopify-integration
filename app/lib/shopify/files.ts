@@ -642,6 +642,35 @@ export async function uploadBynderAsset(
 				);
 				if (uploadBody instanceof Buffer) {
 					console.log(`[Upload Debug] Body size: ${uploadBody.length} bytes`);
+					// Log first 500 bytes of body to verify multipart format
+					const bodyStart = uploadBody.toString(
+						"utf8",
+						0,
+						Math.min(500, uploadBody.length)
+					);
+					console.log(
+						`[Upload Debug] Body start (first 500 bytes): ${bodyStart}`
+					);
+					// Extract boundary from Content-Type header
+					const contentType =
+						uploadHeaders["Content-Type"] ||
+						uploadHeaders["content-type"] ||
+						"";
+					const boundaryMatch = contentType.match(/boundary=([^;]+)/);
+					if (boundaryMatch && boundaryMatch[1]) {
+						const boundary = boundaryMatch[1].trim();
+						console.log(`[Upload Debug] Content-Type boundary: ${boundary}`);
+						// Verify boundary appears in body
+						if (bodyStart.includes(boundary)) {
+							console.log(
+								`[Upload Debug] ✓ Boundary found in body (matches Content-Type)`
+							);
+						} else {
+							console.error(
+								`[Upload Debug] ✗ Boundary NOT found in body - MISMATCH!`
+							);
+						}
+					}
 				}
 				// Count FormData entries - form-data package doesn't have entries() method
 				const polyfillFormDataForCount = formData as unknown as {
@@ -702,8 +731,26 @@ export async function uploadBynderAsset(
 						fetchHeaders[key] = value;
 					}
 
+					// CRITICAL: For GCS signed URLs, Content-Length might be required
+					// But don't set it if it's already in headers (from getHeaders())
+					if (
+						!fetchHeaders["Content-Length"] &&
+						!fetchHeaders["content-length"]
+					) {
+						fetchHeaders["Content-Length"] = bodyArray.length.toString();
+						console.log(
+							`[Upload Debug] Added Content-Length header: ${bodyArray.length}`
+						);
+					}
+
 					console.log(
 						`[Upload Debug] Sending POST request to: ${stagedTarget.url}`
+					);
+					console.log(
+						`[Upload Debug] Final headers: ${JSON.stringify(Object.fromEntries(Object.entries(fetchHeaders).map(([k, v]) => [k, k.toLowerCase() === "content-type" ? v : typeof v === "string" && v.length > 100 ? `${v.substring(0, 100)}...` : v])), null, 2)}`
+					);
+					console.log(
+						`[Upload Debug] Body size: ${bodyArray.length} bytes, type: ${bodyArray.constructor.name}`
 					);
 					const fetchResponse = await fetch(stagedTarget.url, {
 						method: "POST",

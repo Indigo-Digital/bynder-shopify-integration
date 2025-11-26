@@ -28,17 +28,35 @@ export async function checkSyncJobAlerts(
 	const alerts: AlertCheckResult[] = [];
 	const cond = { ...DEFAULT_CONDITIONS, ...conditions };
 
+	// Safety check: ensure prisma is initialized
+	if (!prisma || !prisma.syncJob) {
+		console.error("Prisma client not initialized in checkSyncJobAlerts");
+		return [];
+	}
+
 	// Get job details
-	const job = await prisma.syncJob.findUnique({
-		where: { id: syncJobId },
-		select: {
-			status: true,
-			assetsProcessed: true,
-			errors: true,
-			startedAt: true,
-			completedAt: true,
-		},
-	});
+	let job: {
+		status: string;
+		assetsProcessed: number;
+		errors: string | null;
+		startedAt: Date | null;
+		completedAt: Date | null;
+	} | null = null;
+	try {
+		job = await prisma.syncJob.findUnique({
+			where: { id: syncJobId },
+			select: {
+				status: true,
+				assetsProcessed: true,
+				errors: true,
+				startedAt: true,
+				completedAt: true,
+			},
+		});
+	} catch (error) {
+		console.error("Error fetching sync job in checkSyncJobAlerts:", error);
+		return [];
+	}
 
 	if (!job) {
 		return [];
@@ -59,12 +77,25 @@ export async function checkSyncJobAlerts(
 	}
 
 	// Get metrics for this job
-	const metrics = await prisma.syncMetrics.findMany({
-		where: {
-			shopId,
-			syncJobId,
-		},
-	});
+	let metrics: Array<{
+		metricName: string;
+		value: number;
+	}> = [];
+	try {
+		if (!prisma.syncMetrics) {
+			console.error("prisma.syncMetrics is undefined in checkSyncJobAlerts");
+			return alerts;
+		}
+		metrics = await prisma.syncMetrics.findMany({
+			where: {
+				shopId,
+				syncJobId,
+			},
+		});
+	} catch (error) {
+		console.error("Error fetching metrics in checkSyncJobAlerts:", error);
+		return alerts;
+	}
 
 	const errorRateMetric = metrics.find(
 		(m: { metricName: string }) => m.metricName === "error_rate_percent"
@@ -120,15 +151,27 @@ export async function getShopAlerts(
 	shopId: string,
 	conditions?: AlertConditions
 ): Promise<AlertCheckResult[]> {
-	const recentJobs = await prisma.syncJob.findMany({
-		where: {
-			shopId,
-			status: { in: ["completed", "failed"] },
-		},
-		orderBy: { completedAt: "desc" },
-		take: 5,
-		select: { id: true },
-	});
+	// Safety check: ensure prisma is initialized
+	if (!prisma || !prisma.syncJob) {
+		console.error("Prisma client not initialized in getShopAlerts");
+		return [];
+	}
+
+	let recentJobs: Array<{ id: string }> = [];
+	try {
+		recentJobs = await prisma.syncJob.findMany({
+			where: {
+				shopId,
+				status: { in: ["completed", "failed"] },
+			},
+			orderBy: { completedAt: "desc" },
+			take: 5,
+			select: { id: true },
+		});
+	} catch (error) {
+		console.error("Error fetching recent jobs in getShopAlerts:", error);
+		return [];
+	}
 
 	const allAlerts: AlertCheckResult[] = [];
 

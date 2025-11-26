@@ -37,7 +37,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 						const uuidMatch = decoded.match(
 							/([A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12})/i
 						);
-						if (uuidMatch && uuidMatch[1]) {
+						if (uuidMatch?.[1]) {
 							assetId = uuidMatch[1];
 						} else if (
 							decoded.match(

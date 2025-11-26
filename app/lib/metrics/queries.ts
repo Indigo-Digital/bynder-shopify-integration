@@ -19,6 +19,18 @@ export async function getMetricsSummary(
 	shopId: string,
 	lastNJobs = 10
 ): Promise<MetricsSummary> {
+	// Safety check: ensure prisma is initialized
+	if (!prisma || !prisma.syncJob) {
+		console.error("Prisma client not initialized in getMetricsSummary");
+		return {
+			averageSyncDuration: 0,
+			averageThroughput: 0,
+			totalApiCalls: 0,
+			errorRateTrend: 0,
+			rateLimitHits: 0,
+		};
+	}
+
 	// Get recent completed jobs
 	const recentJobs = await prisma.syncJob.findMany({
 		where: {
@@ -161,6 +173,12 @@ export async function getJobMetrics(
 	apiCalls: number;
 	errorRate: number;
 } | null> {
+	// Safety check: ensure prisma is initialized
+	if (!prisma || !prisma.syncMetrics) {
+		console.error("Prisma client not initialized in getJobMetrics");
+		return null;
+	}
+
 	const metrics = await prisma.syncMetrics.findMany({
 		where: {
 			shopId,

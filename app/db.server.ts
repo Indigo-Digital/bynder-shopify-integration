@@ -10,13 +10,36 @@ declare global {
 	var migrationChecked: boolean;
 }
 
-if (process.env.NODE_ENV !== "production") {
-	if (!global.prismaGlobal) {
-		global.prismaGlobal = new PrismaClient();
-	}
-}
+// Initialize Prisma client
+// In development, reuse the same instance across hot reloads
+// In production, always create a new instance
+let prisma: PrismaClient;
 
-const prisma = global.prismaGlobal ?? new PrismaClient();
+try {
+	if (process.env.NODE_ENV !== "production") {
+		if (!global.prismaGlobal) {
+			global.prismaGlobal = new PrismaClient({
+				log: process.env.DEBUG_PRISMA ? ["query", "error", "warn"] : ["error"],
+			});
+		}
+		prisma = global.prismaGlobal;
+	} else {
+		// In production, always create a new instance
+		prisma = new PrismaClient({
+			log: process.env.DEBUG_PRISMA ? ["query", "error", "warn"] : ["error"],
+		});
+	}
+
+	// Ensure prisma is initialized
+	if (!prisma) {
+		throw new Error("PrismaClient constructor returned undefined");
+	}
+} catch (error) {
+	console.error("Failed to initialize Prisma client:", error);
+	throw new Error(
+		`Failed to initialize Prisma client: ${error instanceof Error ? error.message : String(error)}`
+	);
+}
 
 /**
  * Check if database migration is needed and apply it automatically

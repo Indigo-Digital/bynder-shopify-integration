@@ -21,14 +21,11 @@ export function BynderPicker({
 	assetTypes = ["image"],
 	autoClose = true,
 }: BynderPickerProps) {
-	const containerRef = useRef<HTMLDivElement>(null);
 	const widgetRef = useRef<unknown>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (!containerRef.current) return;
-
 		setLoading(true);
 		setError(null);
 
@@ -73,12 +70,14 @@ export function BynderPicker({
 
 		function initializeWidget(portal: string) {
 			// Initialize Bynder Compact View
-			if (window.BynderCompactView && containerRef.current) {
+			// Note: Not using container mode to avoid React context issues with UCV v5.x
+			// UCV will use its own modal instead
+			if (window.BynderCompactView) {
 				try {
 					const widget = window.BynderCompactView.open({
 						mode,
 						assetTypes,
-						container: containerRef.current,
+						// Don't provide container - let UCV use its own modal
 						portal: {
 							url: portal,
 							editable: false, // Limit to single portal
@@ -128,63 +127,58 @@ export function BynderPicker({
 		};
 	}, [baseUrl, mode, assetTypes, onAssetSelect, onClose, autoClose]);
 
-	return (
-		<div style={{ width: "100%", minHeight: "600px", position: "relative" }}>
-			{loading && (
-				<div
-					style={{
-						position: "absolute",
-						top: "50%",
-						left: "50%",
-						transform: "translate(-50%, -50%)",
-						textAlign: "center",
-					}}
-				>
-					<p>Loading Bynder picker...</p>
-				</div>
-			)}
-			{error && (
-				<div
-					style={{
-						padding: "2rem",
-						textAlign: "center",
-						color: "#721c24",
-						backgroundColor: "#f8d7da",
-						borderRadius: "4px",
-						margin: "1rem",
-					}}
-				>
-					<p style={{ margin: 0, fontWeight: "bold" }}>Error</p>
-					<p style={{ margin: "0.5rem 0 0 0" }}>{error}</p>
-					{onClose && (
-						<button
-							type="button"
-							onClick={onClose}
-							style={{
-								marginTop: "1rem",
-								padding: "0.5rem 1rem",
-								backgroundColor: "#721c24",
-								color: "white",
-								border: "none",
-								borderRadius: "4px",
-								cursor: "pointer",
-							}}
-						>
-							Close
-						</button>
-					)}
-				</div>
-			)}
+	// Since UCV uses its own modal, we don't need a container
+	// Just show loading/error states and trigger the modal
+	if (loading) {
+		return (
 			<div
-				ref={containerRef}
 				style={{
-					width: "100%",
-					minHeight: "600px",
-					display: loading || error ? "none" : "block",
+					padding: "2rem",
+					textAlign: "center",
 				}}
-			/>
-		</div>
-	);
+			>
+				<p>Loading Bynder picker...</p>
+			</div>
+		);
+	}
+
+	if (error) {
+		return (
+			<div
+				style={{
+					padding: "2rem",
+					textAlign: "center",
+					color: "#721c24",
+					backgroundColor: "#f8d7da",
+					borderRadius: "4px",
+					margin: "1rem",
+				}}
+			>
+				<p style={{ margin: 0, fontWeight: "bold" }}>Error</p>
+				<p style={{ margin: "0.5rem 0 0 0" }}>{error}</p>
+				{onClose && (
+					<button
+						type="button"
+						onClick={onClose}
+						style={{
+							marginTop: "1rem",
+							padding: "0.5rem 1rem",
+							backgroundColor: "#721c24",
+							color: "white",
+							border: "none",
+							borderRadius: "4px",
+							cursor: "pointer",
+						}}
+					>
+						Close
+					</button>
+				)}
+			</div>
+		);
+	}
+
+	// UCV modal is now open, no need to render anything
+	return null;
 }
 
 // Extend window type for Bynder Compact View v5.x

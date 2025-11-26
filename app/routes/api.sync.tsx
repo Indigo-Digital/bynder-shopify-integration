@@ -32,20 +32,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 					const decoded = Buffer.from(assetId, "base64").toString("utf-8");
 					// Check if decoded value looks like a Bynder ID (UUID pattern or alphanumeric)
 					// Bynder IDs are typically UUIDs like: 4BFD3C8F-7ACC-4D1E-98A2-7BFDDC6C511E
-					if (decoded.match(/^[A-Za-z0-9_-]+$/) && decoded.length < 100) {
-						// Extract UUID if it's wrapped in text like "(Asset_id UUID)"
-						const uuidMatch = decoded.match(
+					// But sometimes they come wrapped like: (Asset_id 4BFD3C8F-7ACC-4D1E-98A27BFDDC6C511E)
+					if (decoded.match(/^[A-Za-z0-9_()\s-]+$/) && decoded.length < 100) {
+						// First try standard UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+						let uuidMatch = decoded.match(
 							/([A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12})/i
 						);
-						if (uuidMatch?.[1]) {
-							assetId = uuidMatch[1];
-						} else if (
-							decoded.match(
-								/^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i
-							)
-						) {
-							// Already a UUID
-							assetId = decoded;
+
+						// If not found, try UUID with missing hyphens in last segment: xxxxxxxx-xxxx-xxxx-xxxxxxxxxxxxxxxx
+						if (!uuidMatch) {
+							uuidMatch = decoded.match(
+								/([A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{16})/i
+							);
+							// If found, normalize to standard UUID format by adding hyphens
+							if (uuidMatch?.[1]) {
+								const uuid = uuidMatch[1];
+								// Split the last 16-char segment into 4-12 format
+								const parts = uuid.split("-");
+								if (parts.length === 4 && parts[3]?.length === 16) {
+									assetId = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3].slice(0, 4)}-${parts[3].slice(4)}`;
+								} else {
+									assetId = uuidMatch[1] ?? null;
+								}
+							}
+						} else {
+							assetId = uuidMatch[1] ?? null;
+						}
+
+						// If still no match, try extracting just the hex digits (32 hex chars = UUID without hyphens)
+						if (!uuidMatch) {
+							const hexOnly = decoded.replace(/[^A-F0-9]/gi, "");
+							if (hexOnly.length === 32) {
+								// Format as standard UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+								assetId = `${hexOnly.slice(0, 8)}-${hexOnly.slice(8, 12)}-${hexOnly.slice(12, 16)}-${hexOnly.slice(16, 20)}-${hexOnly.slice(20)}`;
+							}
 						}
 					}
 				} catch {

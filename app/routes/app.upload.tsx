@@ -1,3 +1,4 @@
+import type { JSZipObject } from "jszip";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
@@ -93,7 +94,7 @@ export default function BulkUpload() {
 
 					// Iterate through zip contents
 					const promises: Promise<void>[] = [];
-					zip.forEach((_relativePath, zipEntry) => {
+					zip.forEach((_relativePath: string, zipEntry: JSZipObject) => {
 						if (!zipEntry.dir) {
 							promises.push(
 								(async () => {

@@ -88,6 +88,55 @@ export async function setBynderMetafields(
 }
 
 /**
+ * Set tags for a file in the $app:bynder namespace
+ */
+export async function setFileTags(
+	admin: AdminApi,
+	fileId: string,
+	tags: string[]
+): Promise<void> {
+	const mutations = [
+		{
+			namespace: METAFIELD_NAMESPACE,
+			key: "tags",
+			type: "list.single_line_text_field",
+			value: JSON.stringify(tags),
+			ownerId: fileId,
+		},
+	];
+
+	const response = await admin.graphql(
+		`#graphql
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            namespace
+            key
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `,
+		{
+			variables: {
+				metafields: mutations,
+			},
+		}
+	);
+
+	const data = await response.json();
+	if (data.data?.metafieldsSet?.userErrors?.length > 0) {
+		throw new Error(
+			`Failed to set file tags: ${JSON.stringify(data.data.metafieldsSet.userErrors)}`
+		);
+	}
+}
+
+/**
  * Get Bynder metafields from a Shopify File
  */
 export async function getBynderMetafields(

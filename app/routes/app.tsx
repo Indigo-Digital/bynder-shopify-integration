@@ -20,6 +20,7 @@ export default function App() {
 			<s-app-nav>
 				<s-link href="/app">Home</s-link>
 				<s-link href="/app/files">Files</s-link>
+				<s-link href="/app/upload">Bulk Upload</s-link>
 				<s-link href="/app/sync">Sync</s-link>
 				<s-link href="/app/webhooks">Web Hook</s-link>
 				<s-link href="/app/settings">Settings</s-link>

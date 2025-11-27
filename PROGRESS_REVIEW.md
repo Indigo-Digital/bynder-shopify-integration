@@ -292,6 +292,7 @@ prisma/
    - Asset deletion sync
    - Asset update notifications
    - Bulk operations UI
+   - AI-generated alt text (requires external AI API key)
 
 2. **Monitoring & Observability**
    - Health check endpoints (basic exists)
@@ -755,6 +756,12 @@ The Bynder-Shopify integration app has a **solid foundation** with core function
 - Asset deletion sync
 - Bulk operations UI
 - Advanced filtering/search
+- **AI-Generated Alt Text** 🤖
+  - Checkbox option to auto-generate alt text for uploaded images
+  - Requires integration with external AI vision service (OpenAI GPT-4 Vision, Google Gemini, or Cloudflare Workers AI)
+  - Would analyze images and generate descriptive alt text for accessibility
+  - Note: Shopify Magic's alt text generation is not exposed via API - must use external AI service
+  - Requires API key configuration in app settings
 
 **Sprint 6: Documentation & Onboarding**
 - User guide

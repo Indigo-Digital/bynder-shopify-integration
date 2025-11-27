@@ -47,7 +47,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			fullPath,
 			originalFilename,
 			session.shop,
-			undefined, // no syncJobId
+			undefined // no syncJobId
 		);
 
 		// Set tags if present
@@ -66,7 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		console.error("Upload error:", error);
 		return data(
 			{ error: error instanceof Error ? error.message : "Upload failed" },
-			{ status: 500 },
+			{ status: 500 }
 		);
 	}
 };
@@ -106,7 +106,7 @@ export default function BulkUpload() {
 										zipEntry.name.split("/").pop() || zipEntry.name,
 										{
 											type: "application/octet-stream", // We might try to detect type, but Shopify handles it mostly
-										},
+										}
 									);
 
 									newFiles.push({
@@ -114,7 +114,7 @@ export default function BulkUpload() {
 										file: extractedFile,
 										status: "pending",
 									});
-								})(),
+								})()
 							);
 						}
 					});
@@ -153,8 +153,8 @@ export default function BulkUpload() {
 			// Update status to uploading
 			setFiles((prev) =>
 				prev.map((f) =>
-					f.id === fileObj.id ? { ...f, status: "uploading" } : f,
-				),
+					f.id === fileObj.id ? { ...f, status: "uploading" } : f
+				)
 			);
 
 			const formData = new FormData();
@@ -177,8 +177,8 @@ export default function BulkUpload() {
 				// Update status to success
 				setFiles((prev) =>
 					prev.map((f) =>
-						f.id === fileObj.id ? { ...f, status: "success" } : f,
-					),
+						f.id === fileObj.id ? { ...f, status: "success" } : f
+					)
 				);
 			} catch (error) {
 				// Update status to error
@@ -191,8 +191,8 @@ export default function BulkUpload() {
 									error:
 										error instanceof Error ? error.message : "Unknown error",
 								}
-							: f,
-					),
+							: f
+					)
 				);
 			}
 		}
@@ -246,7 +246,11 @@ export default function BulkUpload() {
 								disabled={isUploading}
 							/>
 							<div
-								style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}
+								style={{
+									fontSize: "0.8rem",
+									color: "#666",
+									marginTop: "0.25rem",
+								}}
 							>
 								Prefix added to filenames
 							</div>
@@ -270,7 +274,11 @@ export default function BulkUpload() {
 								disabled={isUploading}
 							/>
 							<div
-								style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}
+								style={{
+									fontSize: "0.8rem",
+									color: "#666",
+									marginTop: "0.25rem",
+								}}
 							>
 								Comma-separated list
 							</div>
@@ -293,7 +301,9 @@ export default function BulkUpload() {
 						{isDragActive ? (
 							<p>Drop the files here ...</p>
 						) : (
-							<p>Drag 'n' drop images or ZIP files here, or click to select files</p>
+							<p>
+								Drag 'n' drop images or ZIP files here, or click to select files
+							</p>
 						)}
 					</div>
 
@@ -312,7 +322,9 @@ export default function BulkUpload() {
 									<button
 										type="button"
 										onClick={clearCompleted}
-										disabled={isUploading || !files.some((f) => f.status === "success")}
+										disabled={
+											isUploading || !files.some((f) => f.status === "success")
+										}
 										style={{
 											background: "none",
 											border: "none",
@@ -437,7 +449,8 @@ export default function BulkUpload() {
 							variant="primary"
 							onClick={handleUpload}
 							disabled={
-								isUploading || files.filter((f) => f.status === "pending").length === 0
+								isUploading ||
+								files.filter((f) => f.status === "pending").length === 0
 							}
 						>
 							{isUploading

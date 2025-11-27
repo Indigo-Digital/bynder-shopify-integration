@@ -77,6 +77,7 @@ interface UploadFile {
 	file: File;
 	status: "pending" | "uploading" | "success" | "error";
 	error?: string;
+	shopifyFileId?: string;
 }
 
 // Tag chip styles
@@ -112,7 +113,11 @@ export default function BulkUpload() {
 	const [tagInput, setTagInput] = useState("");
 	const [isUploading, setIsUploading] = useState(false);
 	const currentUploadIdRef = useRef<string | null>(null);
-	const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+	const fetcher = useFetcher<{
+		success?: boolean;
+		error?: string;
+		fileId?: string;
+	}>();
 
 	// Handle fetcher responses
 	useEffect(() => {
@@ -123,8 +128,17 @@ export default function BulkUpload() {
 		) {
 			const uploadId = currentUploadIdRef.current;
 			if (fetcher.data.success) {
+				const fileId = fetcher.data.fileId;
 				setFiles((prev) =>
-					prev.map((f) => (f.id === uploadId ? { ...f, status: "success" } : f))
+					prev.map((f) =>
+						f.id === uploadId
+							? {
+									...f,
+									status: "success",
+									...(fileId && { shopifyFileId: fileId }),
+								}
+							: f
+					)
 				);
 			} else if (fetcher.data.error) {
 				setFiles((prev) =>
@@ -604,6 +618,21 @@ export default function BulkUpload() {
 											>
 												{(f.file.size / 1024).toFixed(1)} KB
 											</span>
+											{f.status === "success" && f.shopifyFileId && (
+												<a
+													href={`shopify://admin/content/files/${f.shopifyFileId.split("/").pop()}`}
+													target="_blank"
+													rel="noopener noreferrer"
+													style={{
+														fontSize: "13px",
+														color: "#2c6ecb",
+														textDecoration: "none",
+														flexShrink: 0,
+													}}
+												>
+													View in Shopify ↗
+												</a>
+											)}
 										</div>
 										<div
 											style={{

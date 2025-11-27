@@ -1,11 +1,12 @@
 import type { JSZipObject } from "jszip";
 import JSZip from "jszip";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import {
 	type ActionFunctionArgs,
 	data,
 	type LoaderFunctionArgs,
+	useFetcher,
 } from "react-router";
 import { uploadBufferToShopify } from "../lib/shopify/files";
 import { setFileTags } from "../lib/shopify/metafields";
@@ -78,11 +79,106 @@ interface UploadFile {
 	error?: string;
 }
 
+// Tag chip styles
+const tagChipStyle: React.CSSProperties = {
+	display: "inline-flex",
+	alignItems: "center",
+	gap: "4px",
+	padding: "4px 8px",
+	backgroundColor: "#e4e5e7",
+	borderRadius: "4px",
+	fontSize: "13px",
+	lineHeight: "16px",
+};
+
+const tagRemoveButtonStyle: React.CSSProperties = {
+	display: "inline-flex",
+	alignItems: "center",
+	justifyContent: "center",
+	width: "16px",
+	height: "16px",
+	padding: 0,
+	border: "none",
+	background: "none",
+	cursor: "pointer",
+	borderRadius: "2px",
+	color: "#6d7175",
+};
+
 export default function BulkUpload() {
 	const [files, setFiles] = useState<UploadFile[]>([]);
 	const [folder, setFolder] = useState("");
-	const [tags, setTags] = useState("");
+	const [tags, setTags] = useState<string[]>([]);
+	const [tagInput, setTagInput] = useState("");
 	const [isUploading, setIsUploading] = useState(false);
+	const currentUploadIdRef = useRef<string | null>(null);
+	const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+
+	// Handle fetcher responses
+	useEffect(() => {
+		if (
+			fetcher.state === "idle" &&
+			fetcher.data &&
+			currentUploadIdRef.current
+		) {
+			const uploadId = currentUploadIdRef.current;
+			if (fetcher.data.success) {
+				setFiles((prev) =>
+					prev.map((f) => (f.id === uploadId ? { ...f, status: "success" } : f))
+				);
+			} else if (fetcher.data.error) {
+				setFiles((prev) =>
+					prev.map((f) =>
+						f.id === uploadId
+							? {
+									...f,
+									status: "error",
+									error: fetcher.data?.error || "Unknown error",
+								}
+							: f
+					)
+				);
+			}
+			currentUploadIdRef.current = null;
+		}
+	}, [fetcher.state, fetcher.data]);
+
+	const addTag = (tag: string) => {
+		const trimmed = tag.trim();
+		if (trimmed && !tags.includes(trimmed)) {
+			setTags([...tags, trimmed]);
+		}
+		setTagInput("");
+	};
+
+	const removeTag = (tagToRemove: string) => {
+		setTags(tags.filter((t) => t !== tagToRemove));
+	};
+
+	const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+		if (e.key === "Enter" || e.key === ",") {
+			e.preventDefault();
+			addTag(tagInput);
+		} else if (e.key === "Backspace" && tagInput === "" && tags.length > 0) {
+			// Remove last tag when backspace on empty input
+			setTags(tags.slice(0, -1));
+		}
+	};
+
+	const handleTagInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const value = e.target.value;
+		// If user types a comma, add the tag
+		if (value.includes(",")) {
+			const parts = value.split(",");
+			for (const part of parts) {
+				if (part.trim()) {
+					addTag(part);
+				}
+			}
+		} else {
+			setTagInput(value);
+		}
+	};
 
 	const onDrop = useCallback(async (acceptedFiles: File[]) => {
 		const newFiles: UploadFile[] = [];
@@ -105,7 +201,7 @@ export default function BulkUpload() {
 										[content],
 										zipEntry.name.split("/").pop() || zipEntry.name,
 										{
-											type: "application/octet-stream", // We might try to detect type, but Shopify handles it mostly
+											type: "application/octet-stream",
 										}
 									);
 
@@ -144,60 +240,57 @@ export default function BulkUpload() {
 		},
 	});
 
-	const handleUpload = async () => {
-		setIsUploading(true);
-
+	// Process uploads sequentially using the fetcher
+	const uploadNextFile = useCallback(() => {
 		const pendingFiles = files.filter((f) => f.status === "pending");
-
-		for (const fileObj of pendingFiles) {
-			// Update status to uploading
-			setFiles((prev) =>
-				prev.map((f) =>
-					f.id === fileObj.id ? { ...f, status: "uploading" } : f
-				)
-			);
-
-			const formData = new FormData();
-			formData.append("file", fileObj.file);
-			formData.append("folder", folder);
-			formData.append("tags", tags);
-
-			try {
-				const response = await fetch("", {
-					method: "POST",
-					body: formData,
-				});
-
-				const result = await response.json();
-
-				if (!response.ok || result.error) {
-					throw new Error(result.error || "Upload failed");
-				}
-
-				// Update status to success
-				setFiles((prev) =>
-					prev.map((f) =>
-						f.id === fileObj.id ? { ...f, status: "success" } : f
-					)
-				);
-			} catch (error) {
-				// Update status to error
-				setFiles((prev) =>
-					prev.map((f) =>
-						f.id === fileObj.id
-							? {
-									...f,
-									status: "error",
-									error:
-										error instanceof Error ? error.message : "Unknown error",
-								}
-							: f
-					)
-				);
-			}
+		if (pendingFiles.length === 0) {
+			setIsUploading(false);
+			return;
 		}
 
-		setIsUploading(false);
+		const fileObj = pendingFiles[0];
+		if (!fileObj) {
+			setIsUploading(false);
+			return;
+		}
+
+		currentUploadIdRef.current = fileObj.id;
+
+		// Update status to uploading
+		setFiles((prev) =>
+			prev.map((f) => (f.id === fileObj.id ? { ...f, status: "uploading" } : f))
+		);
+
+		const formData = new FormData();
+		formData.append("file", fileObj.file);
+		formData.append("folder", folder);
+		formData.append("tags", tags.join(","));
+
+		fetcher.submit(formData, {
+			method: "POST",
+			encType: "multipart/form-data",
+		});
+	}, [files, folder, tags, fetcher]);
+
+	// When a file finishes (success or error), upload the next one
+	useEffect(() => {
+		if (
+			isUploading &&
+			fetcher.state === "idle" &&
+			!currentUploadIdRef.current
+		) {
+			const pendingFiles = files.filter((f) => f.status === "pending");
+			if (pendingFiles.length > 0) {
+				uploadNextFile();
+			} else {
+				setIsUploading(false);
+			}
+		}
+	}, [isUploading, fetcher.state, files, uploadNextFile]);
+
+	const handleUpload = () => {
+		setIsUploading(true);
+		uploadNextFile();
 	};
 
 	const removeFile = (id: string) => {
@@ -207,6 +300,8 @@ export default function BulkUpload() {
 	const clearCompleted = () => {
 		setFiles((prev) => prev.filter((f) => f.status !== "success"));
 	};
+
+	const pendingCount = files.filter((f) => f.status === "pending").length;
 
 	return (
 		<s-page heading="Bulk Upload">
@@ -220,121 +315,194 @@ export default function BulkUpload() {
 						</p>
 					</s-banner>
 
+					{/* Settings Section */}
 					<div
 						style={{
 							display: "grid",
 							gridTemplateColumns: "1fr 1fr",
-							gap: "1rem",
-							marginBottom: "1rem",
+							gap: "16px",
+							padding: "16px",
+							backgroundColor: "#fafbfb",
+							borderRadius: "8px",
+							border: "1px solid #e1e3e5",
 						}}
 					>
-						<label style={{ display: "block" }}>
-							<div style={{ marginBottom: "0.5rem", fontWeight: "bold" }}>
-								Folder Location (optional)
-							</div>
-							<input
-								type="text"
-								value={folder}
-								onChange={(e) => setFolder(e.target.value)}
-								placeholder="e.g. campaigns/summer"
-								style={{
-									width: "100%",
-									padding: "0.5rem",
-									border: "1px solid #ccc",
-									borderRadius: "4px",
-								}}
-								disabled={isUploading}
-							/>
+						<div>
+							<label style={{ display: "block" }}>
+								<div
+									style={{
+										marginBottom: "8px",
+										fontWeight: 600,
+										fontSize: "14px",
+									}}
+								>
+									Folder Location (optional)
+								</div>
+								<input
+									type="text"
+									value={folder}
+									onChange={(e) => setFolder(e.target.value)}
+									placeholder="e.g. campaigns/summer"
+									disabled={isUploading}
+									style={{
+										width: "100%",
+										padding: "8px 12px",
+										fontSize: "14px",
+										lineHeight: "20px",
+										border: "1px solid #8c9196",
+										borderRadius: "8px",
+										outline: "none",
+										boxSizing: "border-box",
+									}}
+								/>
+								<div
+									style={{
+										marginTop: "4px",
+										fontSize: "13px",
+										color: "#6d7175",
+									}}
+								>
+									Prefix added to filenames
+								</div>
+							</label>
+						</div>
+
+						<div>
 							<div
 								style={{
-									fontSize: "0.8rem",
-									color: "#666",
-									marginTop: "0.25rem",
+									marginBottom: "8px",
+									fontWeight: 600,
+									fontSize: "14px",
 								}}
 							>
-								Prefix added to filenames
-							</div>
-						</label>
-
-						<label style={{ display: "block" }}>
-							<div style={{ marginBottom: "0.5rem", fontWeight: "bold" }}>
 								Tags (optional)
 							</div>
-							<input
-								type="text"
-								value={tags}
-								onChange={(e) => setTags(e.target.value)}
-								placeholder="e.g. campaign, summer-2025"
-								style={{
-									width: "100%",
-									padding: "0.5rem",
-									border: "1px solid #ccc",
-									borderRadius: "4px",
-								}}
-								disabled={isUploading}
-							/>
 							<div
 								style={{
-									fontSize: "0.8rem",
-									color: "#666",
-									marginTop: "0.25rem",
+									display: "flex",
+									flexWrap: "wrap",
+									gap: "8px",
+									padding: "8px 12px",
+									minHeight: "40px",
+									border: "1px solid #8c9196",
+									borderRadius: "8px",
+									alignItems: "center",
+									backgroundColor: isUploading ? "#fafbfb" : "white",
+									boxSizing: "border-box",
 								}}
 							>
-								Comma-separated list
+								{tags.map((tag) => (
+									<span key={tag} style={tagChipStyle}>
+										{tag}
+										<button
+											type="button"
+											onClick={() => removeTag(tag)}
+											disabled={isUploading}
+											style={tagRemoveButtonStyle}
+											aria-label={`Remove ${tag}`}
+										>
+											<svg
+												viewBox="0 0 20 20"
+												width="12"
+												height="12"
+												fill="currentColor"
+												aria-hidden="true"
+											>
+												<path d="M6.707 5.293a1 1 0 0 0-1.414 1.414l3.293 3.293-3.293 3.293a1 1 0 1 0 1.414 1.414l3.293-3.293 3.293 3.293a1 1 0 0 0 1.414-1.414l-3.293-3.293 3.293-3.293a1 1 0 0 0-1.414-1.414l-3.293 3.293-3.293-3.293z" />
+											</svg>
+										</button>
+									</span>
+								))}
+								<input
+									type="text"
+									value={tagInput}
+									onChange={handleTagInputChange}
+									onKeyDown={handleTagKeyDown}
+									onBlur={() => tagInput && addTag(tagInput)}
+									placeholder={tags.length === 0 ? "Type and press Enter" : ""}
+									disabled={isUploading}
+									style={{
+										flex: 1,
+										minWidth: "100px",
+										border: "none",
+										outline: "none",
+										fontSize: "14px",
+										lineHeight: "20px",
+										padding: 0,
+										backgroundColor: "transparent",
+									}}
+								/>
 							</div>
-						</label>
+							<div
+								style={{
+									marginTop: "4px",
+									fontSize: "13px",
+									color: "#6d7175",
+								}}
+							>
+								Press Enter or comma to add tags
+							</div>
+						</div>
 					</div>
 
+					{/* Dropzone */}
 					<div
 						{...getRootProps()}
 						style={{
-							border: "2px dashed #ccc",
+							border: "2px dashed #8c9196",
 							borderRadius: "8px",
-							padding: "3rem",
+							padding: "40px 20px",
 							textAlign: "center",
 							cursor: isUploading ? "not-allowed" : "pointer",
-							backgroundColor: isDragActive ? "#f0f0f0" : "transparent",
-							marginBottom: "1rem",
+							backgroundColor: isDragActive ? "#f1f2f4" : "#fafbfb",
+							transition: "background-color 0.2s",
 						}}
 					>
 						<input {...getInputProps()} disabled={isUploading} />
-						{isDragActive ? (
-							<p>Drop the files here ...</p>
-						) : (
-							<p>
-								Drag 'n' drop images or ZIP files here, or click to select files
-							</p>
-						)}
+						<div style={{ fontSize: "14px", color: "#202223" }}>
+							{isDragActive
+								? "Drop the files here..."
+								: "Drag & drop images or ZIP files here, or click to select"}
+						</div>
+						<div
+							style={{ fontSize: "13px", color: "#6d7175", marginTop: "8px" }}
+						>
+							Supports images and ZIP archives
+						</div>
 					</div>
 
+					{/* File List */}
 					{files.length > 0 && (
-						<div style={{ marginBottom: "1rem" }}>
+						<div>
 							<div
 								style={{
 									display: "flex",
 									justifyContent: "space-between",
 									alignItems: "center",
-									marginBottom: "0.5rem",
+									marginBottom: "8px",
 								}}
 							>
-								<h3 style={{ fontWeight: "bold" }}>Files ({files.length})</h3>
-								<div style={{ display: "flex", gap: "0.5rem" }}>
-									<button
-										type="button"
-										onClick={clearCompleted}
-										disabled={
-											isUploading || !files.some((f) => f.status === "success")
-										}
-										style={{
-											background: "none",
-											border: "none",
-											color: "#0070f3",
-											cursor: "pointer",
-											textDecoration: "underline",
-										}}
-									>
-										Clear Completed
-									</button>
+								<div style={{ fontWeight: 600, fontSize: "14px" }}>
+									Files ({files.length})
+								</div>
+								<div style={{ display: "flex", gap: "16px" }}>
+									{files.some((f) => f.status === "success") && (
+										<button
+											type="button"
+											onClick={clearCompleted}
+											disabled={isUploading}
+											style={{
+												background: "none",
+												border: "none",
+												color: "#2c6ecb",
+												cursor: "pointer",
+												fontSize: "14px",
+												textDecoration: "underline",
+											}}
+										>
+											Clear Completed
+										</button>
+									)}
 									<button
 										type="button"
 										onClick={() => setFiles([])}
@@ -342,8 +510,9 @@ export default function BulkUpload() {
 										style={{
 											background: "none",
 											border: "none",
-											color: "#d00",
+											color: "#d72c0d",
 											cursor: "pointer",
+											fontSize: "14px",
 											textDecoration: "underline",
 										}}
 									>
@@ -354,72 +523,108 @@ export default function BulkUpload() {
 
 							<div
 								style={{
-									border: "1px solid #eee",
-									borderRadius: "4px",
+									border: "1px solid #e1e3e5",
+									borderRadius: "8px",
 									maxHeight: "300px",
 									overflowY: "auto",
 								}}
 							>
-								{files.map((f) => (
+								{files.map((f, index) => (
 									<div
 										key={f.id}
 										style={{
-											padding: "0.5rem",
-											borderBottom: "1px solid #eee",
+											padding: "12px",
+											borderBottom:
+												index < files.length - 1 ? "1px solid #e1e3e5" : "none",
 											display: "flex",
 											justifyContent: "space-between",
 											alignItems: "center",
 											backgroundColor:
 												f.status === "success"
-													? "#f0fff4"
+													? "#f1f8f5"
 													: f.status === "error"
-														? "#fff5f5"
-														: "transparent",
+														? "#fef6f6"
+														: f.status === "uploading"
+															? "#f4f6f8"
+															: "white",
 										}}
 									>
 										<div
 											style={{
 												display: "flex",
 												alignItems: "center",
-												gap: "0.5rem",
+												gap: "12px",
 												overflow: "hidden",
+												flex: 1,
 											}}
 										>
 											<span
 												style={{
-													fontSize: "0.8rem",
-													padding: "0.1rem 0.3rem",
-													borderRadius: "3px",
-													backgroundColor: "#eee",
+													fontSize: "11px",
+													padding: "2px 6px",
+													borderRadius: "4px",
+													fontWeight: 600,
+													textTransform: "uppercase",
+													backgroundColor:
+														f.status === "success"
+															? "#aee9d1"
+															: f.status === "error"
+																? "#ffc5c5"
+																: f.status === "uploading"
+																	? "#a4e8f2"
+																	: "#e4e5e7",
+													color:
+														f.status === "success"
+															? "#0d542d"
+															: f.status === "error"
+																? "#8c0000"
+																: f.status === "uploading"
+																	? "#003f4f"
+																	: "#6d7175",
 												}}
 											>
-												{f.status.toUpperCase()}
+												{f.status}
 											</span>
 											<span
 												style={{
 													whiteSpace: "nowrap",
 													overflow: "hidden",
 													textOverflow: "ellipsis",
-													maxWidth: "300px",
+													fontSize: "14px",
 												}}
 											>
 												{f.file.name}
 											</span>
-											<span style={{ fontSize: "0.8rem", color: "#999" }}>
-												({(f.file.size / 1024).toFixed(1)} KB)
+											<span
+												style={{
+													fontSize: "13px",
+													color: "#6d7175",
+													flexShrink: 0,
+												}}
+											>
+												{(f.file.size / 1024).toFixed(1)} KB
 											</span>
 										</div>
-										<div>
-											{f.status === "error" && (
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "8px",
+											}}
+										>
+											{f.status === "error" && f.error && (
 												<span
 													style={{
-														color: "#d00",
-														fontSize: "0.8rem",
-														marginRight: "0.5rem",
+														color: "#d72c0d",
+														fontSize: "13px",
+														maxWidth: "200px",
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap",
 													}}
 													title={f.error}
 												>
-													Error: {f.error}
+													{f.error}
 												</span>
 											)}
 											<button
@@ -429,13 +634,25 @@ export default function BulkUpload() {
 												style={{
 													background: "none",
 													border: "none",
-													cursor: "pointer",
-													fontSize: "1.2rem",
-													lineHeight: 1,
-													color: "#999",
+													cursor: isUploading ? "not-allowed" : "pointer",
+													padding: "4px",
+													borderRadius: "4px",
+													color: "#6d7175",
+													display: "flex",
+													alignItems: "center",
+													justifyContent: "center",
 												}}
+												aria-label={`Remove ${f.file.name}`}
 											>
-												&times;
+												<svg
+													viewBox="0 0 20 20"
+													width="16"
+													height="16"
+													fill="currentColor"
+													aria-hidden="true"
+												>
+													<path d="M6.707 5.293a1 1 0 0 0-1.414 1.414l3.293 3.293-3.293 3.293a1 1 0 1 0 1.414 1.414l3.293-3.293 3.293 3.293a1 1 0 0 0 1.414-1.414l-3.293-3.293 3.293-3.293a1 1 0 0 0-1.414-1.414l-3.293 3.293-3.293-3.293z" />
+												</svg>
 											</button>
 										</div>
 									</div>
@@ -444,20 +661,16 @@ export default function BulkUpload() {
 						</div>
 					)}
 
-					<s-stack direction="inline">
-						<s-button
-							variant="primary"
-							onClick={handleUpload}
-							disabled={
-								isUploading ||
-								files.filter((f) => f.status === "pending").length === 0
-							}
-						>
-							{isUploading
-								? "Uploading..."
-								: `Upload ${files.filter((f) => f.status === "pending").length} Files`}
-						</s-button>
-					</s-stack>
+					{/* Upload Button */}
+					<s-button
+						variant="primary"
+						onClick={handleUpload}
+						disabled={isUploading || pendingCount === 0}
+					>
+						{isUploading
+							? "Uploading..."
+							: `Upload ${pendingCount} File${pendingCount !== 1 ? "s" : ""}`}
+					</s-button>
 				</s-stack>
 			</s-section>
 		</s-page>

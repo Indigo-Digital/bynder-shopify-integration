@@ -197,6 +197,7 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 							filenamePrefix: shop.filenamePrefix,
 							filenameSuffix: shop.filenameSuffix,
 							altTextPrefix: shop.altTextPrefix,
+							enableAutoAltText: shop.enableAutoAltText,
 							syncTags: shop.syncTags,
 							syncJobId: syncJob.id,
 						}

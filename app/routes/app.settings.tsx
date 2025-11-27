@@ -151,6 +151,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const filenamePrefix = formData.get("filenamePrefix")?.toString() || null;
 		const filenameSuffix = formData.get("filenameSuffix")?.toString() || null;
 		const altTextPrefix = formData.get("altTextPrefix")?.toString() || null;
+		const enableAutoAltText = formData.get("enableAutoAltText") === "true";
 
 		await prisma.shop.upsert({
 			where: { shop },
@@ -160,12 +161,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 				filenamePrefix,
 				filenameSuffix,
 				altTextPrefix,
+				enableAutoAltText,
 			},
 			update: {
 				fileFolderTemplate,
 				filenamePrefix,
 				filenameSuffix,
 				altTextPrefix,
+				enableAutoAltText,
 			},
 		});
 
@@ -180,6 +183,7 @@ export default function SettingsPage() {
 		useLoaderData<typeof loader>();
 	const fetcher = useFetcher();
 	const testFetcher = useFetcher();
+	const aiTestFetcher = useFetcher();
 
 	const [syncTags, setSyncTags] = useState(
 		shopConfig?.syncTags || "shopify-sync"
@@ -200,6 +204,9 @@ export default function SettingsPage() {
 	);
 	const [altTextPrefix, setAltTextPrefix] = useState(
 		shopConfig?.altTextPrefix || "[Bynder]"
+	);
+	const [enableAutoAltText, setEnableAutoAltText] = useState(
+		shopConfig?.enableAutoAltText || false
 	);
 
 	const isSubmitting = fetcher.state !== "idle";
@@ -245,6 +252,12 @@ export default function SettingsPage() {
 		testFetcher.load("/api/bynder/test");
 	};
 
+	const handleTestAiConnection = () => {
+		aiTestFetcher.load("/api/ai-test");
+	};
+
+	const isTestingAi = aiTestFetcher.state !== "idle";
+
 	useEffect(() => {
 		if (shopConfig?.syncTags) {
 			setSyncTags(shopConfig.syncTags);
@@ -263,6 +276,9 @@ export default function SettingsPage() {
 		}
 		if (shopConfig?.altTextPrefix !== undefined) {
 			setAltTextPrefix(shopConfig.altTextPrefix || "[Bynder]");
+		}
+		if (shopConfig?.enableAutoAltText !== undefined) {
+			setEnableAutoAltText(shopConfig.enableAutoAltText);
 		}
 	}, [shopConfig]);
 
@@ -353,6 +369,11 @@ export default function SettingsPage() {
 					<input type="hidden" name="filenamePrefix" value={filenamePrefix} />
 					<input type="hidden" name="filenameSuffix" value={filenameSuffix} />
 					<input type="hidden" name="altTextPrefix" value={altTextPrefix} />
+					<input
+						type="hidden"
+						name="enableAutoAltText"
+						value={String(enableAutoAltText)}
+					/>
 					<s-stack direction="block" gap="base">
 						<s-paragraph>
 							Configure how Bynder assets are organized in Shopify Files. Use
@@ -473,6 +494,81 @@ export default function SettingsPage() {
 							<s-text>
 								Prefix to add to alt text for accessibility (e.g., '[Bynder]')
 							</s-text>
+						</s-stack>
+
+						{/* AI Alt Text Section */}
+						<s-stack direction="block" gap="base">
+							<s-box padding="base" borderWidth="base" borderRadius="base">
+								<s-stack direction="block" gap="base">
+									<s-stack direction="inline" gap="base" alignItems="center">
+										<s-checkbox
+											checked={enableAutoAltText}
+											onChange={(e) => {
+												const target = e.currentTarget;
+												if (target) {
+													setEnableAutoAltText(target.checked);
+												}
+											}}
+										/>
+										<s-text>
+											<strong>Enable AI-Generated Alt Text</strong>
+										</s-text>
+									</s-stack>
+									<s-paragraph>
+										Use Google Gemini Vision to automatically generate
+										descriptive alt text for images. This improves accessibility
+										and SEO. The AI prefix will be applied to AI-generated alt
+										text if configured above.
+									</s-paragraph>
+
+									<s-stack direction="inline" gap="base" alignItems="center">
+										<s-button
+											variant="secondary"
+											onClick={handleTestAiConnection}
+											disabled={isTestingAi}
+											type="button"
+										>
+											{isTestingAi ? "Testing..." : "Test AI Connection"}
+										</s-button>
+										{aiTestFetcher.data &&
+											(aiTestFetcher.data.success ? (
+												<s-badge tone="success">Connected</s-badge>
+											) : aiTestFetcher.data.available === false ? (
+												<s-badge tone="warning">Not Configured</s-badge>
+											) : (
+												<s-badge tone="critical">Error</s-badge>
+											))}
+									</s-stack>
+
+									{aiTestFetcher.data && !aiTestFetcher.data.success && (
+										<s-banner
+											tone={
+												aiTestFetcher.data.available === false
+													? "warning"
+													: "critical"
+											}
+										>
+											{aiTestFetcher.data.error}
+										</s-banner>
+									)}
+
+									{aiTestFetcher.data?.success && (
+										<s-banner tone="success">
+											AI connection successful! Using model:{" "}
+											{aiTestFetcher.data.model}
+										</s-banner>
+									)}
+
+									{!aiTestFetcher.data && (
+										<s-text>
+											<em>
+												Requires GEMINI_API_KEY or GOOGLE_SERVICE_ACCOUNT_JSON
+												environment variable.
+											</em>
+										</s-text>
+									)}
+								</s-stack>
+							</s-box>
 						</s-stack>
 
 						<s-button type="submit" disabled={isSubmitting}>

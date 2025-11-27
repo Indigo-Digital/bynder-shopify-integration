@@ -110,6 +110,7 @@ export async function syncSingleBynderAsset(
 				filenamePrefix: shop.filenamePrefix,
 				filenameSuffix: shop.filenameSuffix,
 				altTextPrefix: shop.altTextPrefix,
+				enableAutoAltText: shop.enableAutoAltText,
 				syncTags: shop.syncTags,
 			}
 		);

@@ -1,5 +1,6 @@
 import axios from "axios";
 import FormData from "form-data";
+import { generateAltText } from "../ai/gemini-vision.js";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
 import { recordApiCall } from "../metrics/collector.js";
@@ -721,6 +722,7 @@ export async function uploadBynderAsset(
 		filenamePrefix?: string | null;
 		filenameSuffix?: string | null;
 		altTextPrefix?: string | null;
+		enableAutoAltText?: boolean; // Enable AI-generated alt text
 		syncTags?: string;
 		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}
@@ -848,9 +850,29 @@ export async function uploadBynderAsset(
 		shopConfig?.filenameSuffix
 	);
 
-	const altText = shopConfig?.altTextPrefix
-		? `${shopConfig.altTextPrefix} ${assetInfo.description || assetInfo.name}`.trim()
-		: assetInfo.description || assetInfo.name;
+	// Generate alt text - use AI if enabled, otherwise use default
+	let altText: string | undefined;
+	if (shopConfig?.enableAutoAltText && contentType.startsWith("image/")) {
+		// Try AI-generated alt text
+		const aiAltText = await generateAltText(
+			buffer,
+			contentType,
+			originalFilename
+		);
+		if (aiAltText) {
+			// Apply prefix to AI-generated alt text if configured
+			altText = shopConfig?.altTextPrefix
+				? `${shopConfig.altTextPrefix} ${aiAltText}`.trim()
+				: aiAltText;
+		}
+	}
+
+	// Fallback to default alt text if AI didn't generate one
+	if (!altText) {
+		altText = shopConfig?.altTextPrefix
+			? `${shopConfig.altTextPrefix} ${assetInfo.description || assetInfo.name}`.trim()
+			: assetInfo.description || assetInfo.name;
+	}
 
 	// Use the common upload function
 	const result = await uploadBufferToShopify(

@@ -42,6 +42,7 @@ model Shop {
   filenamePrefix    String? // Prefix for filenames (e.g., "[Bynder]", "BYNDER_")
   filenameSuffix    String? // Suffix for filenames (e.g., "_bynder")
   altTextPrefix     String? // Prefix for alt text (e.g., "[Bynder]")
+  enableAutoAltText Boolean  @default(false) // Enable AI-generated alt text using Google Gemini Vision
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

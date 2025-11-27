@@ -32,6 +32,7 @@
 	},
 	"dependencies": {
 		"@bynder/bynder-js-sdk": "^2.5.2",
+		"@google/genai": "^1.30.0",
 		"@prisma/client": "^6.19.0",
 		"@react-router/dev": "^7.9.3",
 		"@react-router/fs-routes": "^7.9.3",

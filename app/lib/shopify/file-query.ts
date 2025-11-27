@@ -63,14 +63,6 @@ export async function getShopifyFileDetails(
               id
               url
               fileStatus
-              metafields(namespace: "$app:bynder", first: 10) {
-                edges {
-                  node {
-                    key
-                    value
-                  }
-                }
-              }
             }
           }
         }

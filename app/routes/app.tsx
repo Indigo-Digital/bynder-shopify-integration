@@ -19,10 +19,11 @@ export default function App() {
 		<AppProvider embedded apiKey={apiKey}>
 			<s-app-nav>
 				<s-link href="/app">Home</s-link>
-				<s-link href="/app/files">Files</s-link>
+				<s-link href="/app/file-manager">File Manager</s-link>
+				<s-link href="/app/files">Synced Assets</s-link>
 				<s-link href="/app/upload">Bulk Upload</s-link>
 				<s-link href="/app/sync">Sync</s-link>
-				<s-link href="/app/webhooks">Web Hook</s-link>
+				<s-link href="/app/webhooks">Webhooks</s-link>
 				<s-link href="/app/settings">Settings</s-link>
 			</s-app-nav>
 			<Outlet />

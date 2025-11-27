@@ -73,6 +73,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	};
 };
 
+const getStatusTone = (
+	status: string
+): "success" | "critical" | "warning" | "neutral" => {
+	switch (status) {
+		case "completed":
+			return "success";
+		case "failed":
+			return "critical";
+		case "running":
+		case "pending":
+			return "warning";
+		default:
+			return "neutral";
+	}
+};
+
 export default function Dashboard() {
 	const { shopConfig, stats, recentJobs, connectionStatus } =
 		useLoaderData<typeof loader>();
@@ -83,25 +99,20 @@ export default function Dashboard() {
 			<s-page heading="Bynder Integration Dashboard">
 				<s-section>
 					<s-banner tone="warning">
-						<s-paragraph>
-							<strong>Setup Required:</strong> Please configure your Bynder
-							connection in <s-link href="/app/settings">Settings</s-link> to
-							get started.
-						</s-paragraph>
+						<strong>Setup Required:</strong> Please configure your Bynder
+						connection in <s-link href="/app/settings">Settings</s-link> to get
+						started.
 					</s-banner>
-					<div style={{ marginTop: "1rem" }}>
-						<s-stack direction="block" gap="base">
-							<s-heading>Quick Actions</s-heading>
-							<s-stack direction="inline" gap="base">
-								<s-button variant="primary" href="/app/settings">
-									Go to Settings
-								</s-button>
-								<s-button variant="secondary" href="/app/files">
-									View Files
-								</s-button>
-							</s-stack>
-						</s-stack>
-					</div>
+				</s-section>
+				<s-section heading="Quick Actions">
+					<s-stack direction="inline" gap="base">
+						<s-button variant="primary" href="/app/settings">
+							Go to Settings
+						</s-button>
+						<s-button variant="secondary" href="/app/file-manager">
+							File Manager
+						</s-button>
+					</s-stack>
 				</s-section>
 			</s-page>
 		);
@@ -111,46 +122,55 @@ export default function Dashboard() {
 		<s-page heading="Bynder Integration Dashboard">
 			{/* Connection Status Banner */}
 			{connectionStatus && (
-				<s-banner tone="success">
-					<s-paragraph>
-						<strong>Connected:</strong> Bynder integration is configured and
-						ready.
-					</s-paragraph>
+				<s-banner tone="success" dismissible>
+					<strong>Connected:</strong> Bynder integration is configured and
+					ready.
 				</s-banner>
 			)}
 
 			{/* Stats Cards */}
 			{stats && (
 				<s-section heading="Sync Statistics">
-					<s-stack direction="inline" gap="base">
+					<s-grid
+						gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))"
+						gap="base"
+					>
 						<s-box padding="base" borderWidth="base" borderRadius="base">
-							<s-text>Total Synced Assets</s-text>
-							<s-heading>{stats.totalSynced}</s-heading>
+							<s-stack direction="block" gap="small-200">
+								<s-text color="subdued">Total Synced Assets</s-text>
+								<s-heading>{stats.totalSynced}</s-heading>
+							</s-stack>
 						</s-box>
 						<s-box padding="base" borderWidth="base" borderRadius="base">
-							<s-text>Synced Last 24 Hours</s-text>
-							<s-heading>{stats.syncedLast24h}</s-heading>
+							<s-stack direction="block" gap="small-200">
+								<s-text color="subdued">Synced Last 24h</s-text>
+								<s-heading>{stats.syncedLast24h}</s-heading>
+							</s-stack>
 						</s-box>
 						{stats.successRate !== null && (
 							<s-box padding="base" borderWidth="base" borderRadius="base">
-								<s-text>Success Rate</s-text>
-								<s-heading>{stats.successRate}%</s-heading>
+								<s-stack direction="block" gap="small-200">
+									<s-text color="subdued">Success Rate</s-text>
+									<s-heading>{stats.successRate}%</s-heading>
+								</s-stack>
 							</s-box>
 						)}
 						{stats.lastSyncTime && (
 							<s-box padding="base" borderWidth="base" borderRadius="base">
-								<s-text>Last Sync</s-text>
-								<s-heading>
-									{new Date(stats.lastSyncTime).toLocaleString()}
-								</s-heading>
-								{stats.lastSyncStatus && (
-									<div style={{ fontSize: "0.75rem", color: "#666" }}>
-										Status: {stats.lastSyncStatus}
-									</div>
-								)}
+								<s-stack direction="block" gap="small-200">
+									<s-text color="subdued">Last Sync</s-text>
+									<s-text>
+										{new Date(stats.lastSyncTime).toLocaleString()}
+									</s-text>
+									{stats.lastSyncStatus && (
+										<s-badge tone={getStatusTone(stats.lastSyncStatus)}>
+											{stats.lastSyncStatus}
+										</s-badge>
+									)}
+								</s-stack>
 							</s-box>
 						)}
-					</s-stack>
+					</s-grid>
 				</s-section>
 			)}
 
@@ -166,8 +186,11 @@ export default function Dashboard() {
 							{fetcher.state !== "idle" ? "Syncing..." : "Sync Now"}
 						</s-button>
 					</fetcher.Form>
+					<s-button variant="secondary" href="/app/file-manager">
+						File Manager
+					</s-button>
 					<s-button variant="secondary" href="/app/files">
-						View Files
+						Synced Assets
 					</s-button>
 					<s-button variant="secondary" href="/app/sync">
 						Sync Dashboard
@@ -181,42 +204,19 @@ export default function Dashboard() {
 			{/* Recent Activity */}
 			{recentJobs.length > 0 && (
 				<s-section heading="Recent Activity">
-					<s-stack direction="block" gap="base">
+					<s-stack direction="block" gap="small">
 						{recentJobs.map((job) => (
 							<s-box
 								key={job.id}
-								padding="base"
+								padding="small"
 								borderWidth="base"
 								borderRadius="base"
 							>
 								<s-stack direction="inline" gap="base" alignItems="center">
-									<span
-										style={{
-											padding: "0.25rem 0.5rem",
-											borderRadius: "4px",
-											fontSize: "0.75rem",
-											fontWeight: "600",
-											textTransform: "uppercase",
-											backgroundColor:
-												job.status === "completed"
-													? "#d4edda"
-													: job.status === "failed"
-														? "#f8d7da"
-														: job.status === "running"
-															? "#fff3cd"
-															: "#e2e3e5",
-											color:
-												job.status === "completed"
-													? "#155724"
-													: job.status === "failed"
-														? "#721c24"
-														: job.status === "running"
-															? "#856404"
-															: "#383d41",
-										}}
-									>
+									{job.status === "running" && <s-spinner size="base" />}
+									<s-badge tone={getStatusTone(job.status)}>
 										{job.status}
-									</span>
+									</s-badge>
 									<s-text>
 										<strong>
 											{job.startedAt
@@ -231,56 +231,36 @@ export default function Dashboard() {
 										</s-text>
 									)}
 									{job.assetsCreated !== undefined && job.assetsCreated > 0 && (
-										<span style={{ color: "#155724" }}>
+										<s-badge tone="success">
 											{job.assetsCreated} created
-										</span>
+										</s-badge>
 									)}
 									{job.assetsUpdated !== undefined && job.assetsUpdated > 0 && (
-										<span style={{ color: "#856404" }}>
+										<s-badge tone="warning">
 											{job.assetsUpdated} updated
-										</span>
-									)}
-									{job.status === "running" && (
-										<span
-											style={{
-												display: "inline-block",
-												width: "12px",
-												height: "12px",
-												border: "2px solid #856404",
-												borderTopColor: "transparent",
-												borderRadius: "50%",
-												animation: "spin 1s linear infinite",
-											}}
-										/>
+										</s-badge>
 									)}
 								</s-stack>
 								{job.error && (
-									<div style={{ marginTop: "0.5rem", color: "#721c24" }}>
-										Error: {job.error}
-									</div>
+									<s-banner tone="critical">Error: {job.error}</s-banner>
 								)}
 							</s-box>
 						))}
-						<style>
-							{`
-								@keyframes spin {
-									to { transform: rotate(360deg); }
-								}
-							`}
-						</style>
 					</s-stack>
-					<div style={{ marginTop: "1rem" }}>
-						<s-link href="/app/sync">View all sync jobs →</s-link>
-					</div>
+					<s-link href="/app/sync">View all sync jobs →</s-link>
 				</s-section>
 			)}
 
 			{recentJobs.length === 0 && (
 				<s-section heading="Recent Activity">
-					<s-paragraph>
-						No sync jobs yet. Click "Sync Now" to start syncing assets from
-						Bynder.
-					</s-paragraph>
+					<s-box padding="large" background="subdued" borderRadius="base">
+						<s-stack direction="block" gap="base" alignItems="center">
+							<s-text>
+								No sync jobs yet. Click "Sync Now" to start syncing assets from
+								Bynder.
+							</s-text>
+						</s-stack>
+					</s-box>
 				</s-section>
 			)}
 		</s-page>

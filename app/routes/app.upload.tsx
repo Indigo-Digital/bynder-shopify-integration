@@ -1,3 +1,4 @@
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import type { JSZipObject } from "jszip";
 import JSZip from "jszip";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -8,9 +9,9 @@ import {
 	type LoaderFunctionArgs,
 	useFetcher,
 } from "react-router";
-import { uploadBufferToShopify } from "../lib/shopify/files";
-import { setFileTags } from "../lib/shopify/metafields";
-import { authenticate } from "../shopify.server";
+import { uploadBufferToShopify } from "../lib/shopify/files.js";
+import { setFileTags } from "../lib/shopify/metafields.js";
+import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
 	await authenticate.admin(request);
@@ -33,17 +34,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const buffer = Buffer.from(await file.arrayBuffer());
 		const originalFilename = file.name;
 
-		// Construct filename with prefix
-		// Shopify Files doesn't support folders, so we use prefix_filename format
 		const cleanPrefix = folder
 			.trim()
-			.replace(/^\/+|\/+$/g, "") // Remove leading/trailing slashes
-			.replace(/\//g, "_"); // Replace any remaining slashes with underscores
+			.replace(/^\/+|\/+$/g, "")
+			.replace(/\//g, "_");
 		const fullPath = cleanPrefix
 			? `${cleanPrefix}_${originalFilename}`
 			: originalFilename;
 
-		// Upload to Shopify
 		const { fileId, fileUrl } = await uploadBufferToShopify(
 			admin,
 			buffer,
@@ -51,10 +49,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			fullPath,
 			originalFilename,
 			session.shop,
-			undefined // no syncJobId
+			undefined
 		);
 
-		// Set tags if present
 		if (tags) {
 			const tagList = tags
 				.split(",")
@@ -83,32 +80,6 @@ interface UploadFile {
 	shopifyFileId?: string;
 }
 
-// Tag chip styles
-const tagChipStyle: React.CSSProperties = {
-	display: "inline-flex",
-	alignItems: "center",
-	gap: "4px",
-	padding: "4px 8px",
-	backgroundColor: "#e4e5e7",
-	borderRadius: "4px",
-	fontSize: "13px",
-	lineHeight: "16px",
-};
-
-const tagRemoveButtonStyle: React.CSSProperties = {
-	display: "inline-flex",
-	alignItems: "center",
-	justifyContent: "center",
-	width: "16px",
-	height: "16px",
-	padding: 0,
-	border: "none",
-	background: "none",
-	cursor: "pointer",
-	borderRadius: "2px",
-	color: "#6d7175",
-};
-
 export default function BulkUpload() {
 	const [files, setFiles] = useState<UploadFile[]>([]);
 	const [folder, setFolder] = useState("");
@@ -122,7 +93,6 @@ export default function BulkUpload() {
 		fileId?: string;
 	}>();
 
-	// Handle fetcher responses
 	useEffect(() => {
 		if (
 			fetcher.state === "idle" &&
@@ -160,42 +130,49 @@ export default function BulkUpload() {
 		}
 	}, [fetcher.state, fetcher.data]);
 
-	const addTag = (tag: string) => {
-		const trimmed = tag.trim();
-		if (trimmed && !tags.includes(trimmed)) {
-			setTags([...tags, trimmed]);
-		}
-		setTagInput("");
-	};
-
-	const removeTag = (tagToRemove: string) => {
-		setTags(tags.filter((t) => t !== tagToRemove));
-	};
-
-	const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-		if (e.key === "Enter" || e.key === ",") {
-			e.preventDefault();
-			addTag(tagInput);
-		} else if (e.key === "Backspace" && tagInput === "" && tags.length > 0) {
-			// Remove last tag when backspace on empty input
-			setTags(tags.slice(0, -1));
-		}
-	};
-
-	const handleTagInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const value = e.target.value;
-		// If user types a comma, add the tag
-		if (value.includes(",")) {
-			const parts = value.split(",");
-			for (const part of parts) {
-				if (part.trim()) {
-					addTag(part);
-				}
+	const addTag = useCallback(
+		(tag: string) => {
+			const trimmed = tag.trim();
+			if (trimmed && !tags.includes(trimmed)) {
+				setTags([...tags, trimmed]);
 			}
-		} else {
-			setTagInput(value);
-		}
-	};
+			setTagInput("");
+		},
+		[tags]
+	);
+
+	const removeTag = useCallback((tagToRemove: string) => {
+		setTags((prev) => prev.filter((t) => t !== tagToRemove));
+	}, []);
+
+	const handleTagKeyDown = useCallback(
+		(e: React.KeyboardEvent<HTMLInputElement>) => {
+			if (e.key === "Enter" || e.key === ",") {
+				e.preventDefault();
+				addTag(tagInput);
+			} else if (e.key === "Backspace" && tagInput === "" && tags.length > 0) {
+				setTags((prev) => prev.slice(0, -1));
+			}
+		},
+		[addTag, tagInput, tags.length]
+	);
+
+	const handleTagInputChange = useCallback(
+		(e: React.ChangeEvent<HTMLInputElement>) => {
+			const value = e.target.value;
+			if (value.includes(",")) {
+				const parts = value.split(",");
+				for (const part of parts) {
+					if (part.trim()) {
+						addTag(part);
+					}
+				}
+			} else {
+				setTagInput(value);
+			}
+		},
+		[addTag]
+	);
 
 	const onDrop = useCallback(async (acceptedFiles: File[]) => {
 		const newFiles: UploadFile[] = [];
@@ -204,24 +181,17 @@ export default function BulkUpload() {
 			if (file.name.endsWith(".zip")) {
 				try {
 					const zip = await JSZip.loadAsync(file);
-
-					// Iterate through zip contents
 					const promises: Promise<void>[] = [];
 					zip.forEach((_relativePath: string, zipEntry: JSZipObject) => {
 						if (!zipEntry.dir) {
 							promises.push(
 								(async () => {
-									// Get file content as blob/file
 									const content = await zipEntry.async("blob");
-									// Create a File object
 									const extractedFile = new File(
 										[content],
 										zipEntry.name.split("/").pop() || zipEntry.name,
-										{
-											type: "application/octet-stream",
-										}
+										{ type: "application/octet-stream" }
 									);
-
 									newFiles.push({
 										id: Math.random().toString(36).substring(7),
 										file: extractedFile,
@@ -257,7 +227,6 @@ export default function BulkUpload() {
 		},
 	});
 
-	// Process uploads sequentially using the fetcher
 	const uploadNextFile = useCallback(() => {
 		const pendingFiles = files.filter((f) => f.status === "pending");
 		if (pendingFiles.length === 0) {
@@ -273,7 +242,6 @@ export default function BulkUpload() {
 
 		currentUploadIdRef.current = fileObj.id;
 
-		// Update status to uploading
 		setFiles((prev) =>
 			prev.map((f) => (f.id === fileObj.id ? { ...f, status: "uploading" } : f))
 		);
@@ -289,7 +257,6 @@ export default function BulkUpload() {
 		});
 	}, [files, folder, tags, fetcher]);
 
-	// When a file finishes (success or error), upload the next one
 	useEffect(() => {
 		if (
 			isUploading &&
@@ -305,392 +272,245 @@ export default function BulkUpload() {
 		}
 	}, [isUploading, fetcher.state, files, uploadNextFile]);
 
-	const handleUpload = () => {
+	const handleUpload = useCallback(() => {
 		setIsUploading(true);
 		uploadNextFile();
-	};
+	}, [uploadNextFile]);
 
-	const removeFile = (id: string) => {
+	const removeFile = useCallback((id: string) => {
 		setFiles((prev) => prev.filter((f) => f.id !== id));
-	};
+	}, []);
 
-	const clearCompleted = () => {
+	const clearCompleted = useCallback(() => {
 		setFiles((prev) => prev.filter((f) => f.status !== "success"));
-	};
+	}, []);
+
+	const clearAll = useCallback(() => {
+		setFiles([]);
+	}, []);
 
 	const pendingCount = files.filter((f) => f.status === "pending").length;
+	const successCount = files.filter((f) => f.status === "success").length;
+
+	const getStatusTone = (
+		status: string
+	): "success" | "critical" | "info" | "neutral" => {
+		switch (status) {
+			case "success":
+				return "success";
+			case "error":
+				return "critical";
+			case "uploading":
+				return "info";
+			default:
+				return "neutral";
+		}
+	};
 
 	return (
 		<s-page heading="Bulk Upload">
 			<s-section>
 				<s-stack direction="block" gap="base">
-					<s-banner>
-						<p>
-							Upload images directly to Shopify Files. You can drop individual
-							images or ZIP archives containing images. Optionally specify a
-							folder path and tags to assign to all uploaded files.
-						</p>
+					<s-banner tone="info">
+						Upload images directly to Shopify Files. You can drop individual
+						images or ZIP archives containing images. Optionally specify a
+						filename prefix and tags to assign to all uploaded files.
 					</s-banner>
 
 					{/* Settings Section */}
-					<div
-						style={{
-							display: "grid",
-							gridTemplateColumns: "1fr 1fr",
-							gap: "16px",
-							padding: "16px",
-							backgroundColor: "#fafbfb",
-							borderRadius: "8px",
-							border: "1px solid #e1e3e5",
-						}}
-					>
-						<div>
-							<label style={{ display: "block" }}>
-								<div
-									style={{
-										marginBottom: "8px",
-										fontWeight: 600,
-										fontSize: "14px",
-									}}
-								>
-									Filename Prefix (optional)
-								</div>
-								<input
-									type="text"
+					<s-box padding="base" background="subdued" borderRadius="base">
+						<s-grid gridTemplateColumns="1fr 1fr" gap="base">
+							<s-stack direction="block" gap="small">
+								<s-text-field
+									label="Filename Prefix (optional)"
 									value={folder}
-									onChange={(e) => setFolder(e.target.value)}
+									onChange={(e) =>
+										setFolder((e.target as HTMLInputElement).value)
+									}
 									placeholder="e.g. bf2025 or campaign_summer"
 									disabled={isUploading}
-									style={{
-										width: "100%",
-										padding: "8px 12px",
-										fontSize: "14px",
-										lineHeight: "20px",
-										border: "1px solid #8c9196",
-										borderRadius: "8px",
-										outline: "none",
-										boxSizing: "border-box",
-									}}
 								/>
-								<div
-									style={{
-										marginTop: "4px",
-										fontSize: "13px",
-										color: "#6d7175",
-									}}
-								>
+								<s-text color="subdued">
 									Added to start of filename (e.g., prefix_image.jpg)
-								</div>
-							</label>
-						</div>
+								</s-text>
+							</s-stack>
 
-						<div>
-							<div
-								style={{
-									marginBottom: "8px",
-									fontWeight: 600,
-									fontSize: "14px",
-								}}
-							>
-								Tags (optional)
-							</div>
-							<div
-								style={{
-									display: "flex",
-									flexWrap: "wrap",
-									gap: "8px",
-									padding: "8px 12px",
-									minHeight: "40px",
-									border: "1px solid #8c9196",
-									borderRadius: "8px",
-									alignItems: "center",
-									backgroundColor: isUploading ? "#fafbfb" : "white",
-									boxSizing: "border-box",
-								}}
-							>
-								{tags.map((tag) => (
-									<span key={tag} style={tagChipStyle}>
-										{tag}
-										<button
-											type="button"
-											onClick={() => removeTag(tag)}
-											disabled={isUploading}
-											style={tagRemoveButtonStyle}
-											aria-label={`Remove ${tag}`}
-										>
-											<svg
-												viewBox="0 0 20 20"
-												width="12"
-												height="12"
-												fill="currentColor"
-												aria-hidden="true"
+							<s-stack direction="block" gap="small">
+								<s-text>
+									<strong>Tags (optional)</strong>
+								</s-text>
+								<s-box
+									padding="small"
+									background={isUploading ? "subdued" : "transparent"}
+									borderWidth="base"
+									borderRadius="base"
+								>
+									<s-stack direction="inline" gap="small" alignItems="center">
+										{tags.map((tag) => (
+											<s-clickable-chip
+												key={tag}
+												onClick={() => removeTag(tag)}
+												disabled={isUploading}
 											>
-												<path d="M6.707 5.293a1 1 0 0 0-1.414 1.414l3.293 3.293-3.293 3.293a1 1 0 1 0 1.414 1.414l3.293-3.293 3.293 3.293a1 1 0 0 0 1.414-1.414l-3.293-3.293 3.293-3.293a1 1 0 0 0-1.414-1.414l-3.293 3.293-3.293-3.293z" />
-											</svg>
-										</button>
-									</span>
-								))}
-								<input
-									type="text"
-									value={tagInput}
-									onChange={handleTagInputChange}
-									onKeyDown={handleTagKeyDown}
-									onBlur={() => tagInput && addTag(tagInput)}
-									placeholder={tags.length === 0 ? "Type and press Enter" : ""}
-									disabled={isUploading}
-									style={{
-										flex: 1,
-										minWidth: "100px",
-										border: "none",
-										outline: "none",
-										fontSize: "14px",
-										lineHeight: "20px",
-										padding: 0,
-										backgroundColor: "transparent",
-									}}
-								/>
-							</div>
-							<div
-								style={{
-									marginTop: "4px",
-									fontSize: "13px",
-									color: "#6d7175",
-								}}
-							>
-								Press Enter or comma to add tags
-							</div>
-						</div>
-					</div>
+												{tag} ×
+											</s-clickable-chip>
+										))}
+										<input
+											type="text"
+											value={tagInput}
+											onChange={handleTagInputChange}
+											onKeyDown={handleTagKeyDown}
+											onBlur={() => tagInput && addTag(tagInput)}
+											placeholder={
+												tags.length === 0 ? "Type and press Enter" : ""
+											}
+											disabled={isUploading}
+											style={{
+												flex: 1,
+												minWidth: "100px",
+												border: "none",
+												outline: "none",
+												fontSize: "14px",
+												lineHeight: "20px",
+												padding: "4px",
+												backgroundColor: "transparent",
+											}}
+										/>
+									</s-stack>
+								</s-box>
+								<s-text color="subdued">
+									Press Enter or comma to add tags
+								</s-text>
+							</s-stack>
+						</s-grid>
+					</s-box>
 
-					{/* Dropzone */}
+					{/* Dropzone - using react-dropzone with Polaris-like styling */}
 					<div
 						{...getRootProps()}
 						style={{
-							border: "2px dashed #8c9196",
-							borderRadius: "8px",
-							padding: "40px 20px",
-							textAlign: "center",
+							padding: "24px",
+							border: "1px dashed var(--p-color-border)",
+							borderRadius: "var(--p-border-radius-200)",
+							backgroundColor: isDragActive
+								? "var(--p-color-bg-surface-secondary)"
+								: "transparent",
 							cursor: isUploading ? "not-allowed" : "pointer",
-							backgroundColor: isDragActive ? "#f1f2f4" : "#fafbfb",
-							transition: "background-color 0.2s",
+							textAlign: "center",
 						}}
 					>
 						<input {...getInputProps()} disabled={isUploading} />
-						<div style={{ fontSize: "14px", color: "#202223" }}>
-							{isDragActive
-								? "Drop the files here..."
-								: "Drag & drop images or ZIP files here, or click to select"}
-						</div>
-						<div
-							style={{ fontSize: "13px", color: "#6d7175", marginTop: "8px" }}
-						>
-							Supports images and ZIP archives
-						</div>
+						<s-stack direction="block" gap="small" alignItems="center">
+							<s-icon type="upload" size="base" color="subdued" />
+							<s-text>
+								<strong>
+									{isDragActive
+										? "Drop the files here..."
+										: "Drag & drop images or ZIP files here, or click to select"}
+								</strong>
+							</s-text>
+							<s-text color="subdued">Supports images and ZIP archives</s-text>
+						</s-stack>
 					</div>
 
 					{/* File List */}
 					{files.length > 0 && (
-						<div>
-							<div
-								style={{
-									display: "flex",
-									justifyContent: "space-between",
-									alignItems: "center",
-									marginBottom: "8px",
-								}}
+						<s-stack direction="block" gap="small">
+							<s-stack
+								direction="inline"
+								gap="base"
+								justifyContent="space-between"
+								alignItems="center"
 							>
-								<div style={{ fontWeight: 600, fontSize: "14px" }}>
-									Files ({files.length})
-								</div>
-								<div style={{ display: "flex", gap: "16px" }}>
-									{files.some((f) => f.status === "success") && (
-										<button
-											type="button"
+								<s-text>
+									<strong>Files ({files.length})</strong>
+								</s-text>
+								<s-stack direction="inline" gap="base">
+									{successCount > 0 && (
+										<s-button
+											variant="tertiary"
 											onClick={clearCompleted}
 											disabled={isUploading}
-											style={{
-												background: "none",
-												border: "none",
-												color: "#2c6ecb",
-												cursor: "pointer",
-												fontSize: "14px",
-												textDecoration: "underline",
-											}}
 										>
 											Clear Completed
-										</button>
+										</s-button>
 									)}
-									<button
-										type="button"
-										onClick={() => setFiles([])}
+									<s-button
+										variant="tertiary"
+										tone="critical"
+										onClick={clearAll}
 										disabled={isUploading}
-										style={{
-											background: "none",
-											border: "none",
-											color: "#d72c0d",
-											cursor: "pointer",
-											fontSize: "14px",
-											textDecoration: "underline",
-										}}
 									>
 										Clear All
-									</button>
-								</div>
-							</div>
+									</s-button>
+								</s-stack>
+							</s-stack>
 
-							<div
-								style={{
-									border: "1px solid #e1e3e5",
-									borderRadius: "8px",
-									maxHeight: "300px",
-									overflowY: "auto",
-								}}
-							>
-								{files.map((f, index) => (
+							<s-box borderWidth="base" borderRadius="base" overflow="hidden">
+								{files.map((f, idx) => (
 									<div
 										key={f.id}
 										style={{
-											padding: "12px",
+											padding: "var(--p-space-200)",
 											borderBottom:
-												index < files.length - 1 ? "1px solid #e1e3e5" : "none",
-											display: "flex",
-											justifyContent: "space-between",
-											alignItems: "center",
-											backgroundColor:
-												f.status === "success"
-													? "#f1f8f5"
-													: f.status === "error"
-														? "#fef6f6"
-														: f.status === "uploading"
-															? "#f4f6f8"
-															: "white",
+												idx < files.length - 1
+													? "1px solid var(--p-color-border)"
+													: "none",
 										}}
 									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "12px",
-												overflow: "hidden",
-												flex: 1,
-											}}
+										<s-stack
+											direction="inline"
+											gap="base"
+											alignItems="center"
+											justifyContent="space-between"
 										>
-											<span
-												style={{
-													fontSize: "11px",
-													padding: "2px 6px",
-													borderRadius: "4px",
-													fontWeight: 600,
-													textTransform: "uppercase",
-													backgroundColor:
-														f.status === "success"
-															? "#aee9d1"
-															: f.status === "error"
-																? "#ffc5c5"
-																: f.status === "uploading"
-																	? "#a4e8f2"
-																	: "#e4e5e7",
-													color:
-														f.status === "success"
-															? "#0d542d"
-															: f.status === "error"
-																? "#8c0000"
-																: f.status === "uploading"
-																	? "#003f4f"
-																	: "#6d7175",
-												}}
+											<s-stack
+												direction="inline"
+												gap="small"
+												alignItems="center"
 											>
-												{f.status}
-											</span>
-											<span
-												style={{
-													whiteSpace: "nowrap",
-													overflow: "hidden",
-													textOverflow: "ellipsis",
-													fontSize: "14px",
-												}}
+												{f.status === "uploading" && <s-spinner size="base" />}
+												<s-badge tone={getStatusTone(f.status)}>
+													{f.status}
+												</s-badge>
+												<s-text>
+													{f.file.name.slice(0, 30)}
+													{f.file.name.length > 30 ? "..." : ""}
+												</s-text>
+												<s-text color="subdued">
+													{(f.file.size / 1024).toFixed(1)} KB
+												</s-text>
+												{f.status === "success" && f.shopifyFileId && (
+													<s-link
+														href={`shopify://admin/content/files/${f.shopifyFileId.split("/").pop()}`}
+														target="_blank"
+													>
+														View in Shopify ↗
+													</s-link>
+												)}
+											</s-stack>
+
+											<s-stack
+												direction="inline"
+												gap="small"
+												alignItems="center"
 											>
-												{f.file.name}
-											</span>
-											<span
-												style={{
-													fontSize: "13px",
-													color: "#6d7175",
-													flexShrink: 0,
-												}}
-											>
-												{(f.file.size / 1024).toFixed(1)} KB
-											</span>
-											{f.status === "success" && f.shopifyFileId && (
-												<a
-													href={`shopify://admin/content/files/${f.shopifyFileId.split("/").pop()}`}
-													target="_blank"
-													rel="noopener noreferrer"
-													style={{
-														fontSize: "13px",
-														color: "#2c6ecb",
-														textDecoration: "none",
-														flexShrink: 0,
-													}}
+												{f.status === "error" && f.error && (
+													<s-badge tone="critical">{f.error}</s-badge>
+												)}
+												<s-button
+													variant="tertiary"
+													onClick={() => removeFile(f.id)}
+													disabled={isUploading}
 												>
-													View in Shopify ↗
-												</a>
-											)}
-										</div>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "8px",
-											}}
-										>
-											{f.status === "error" && f.error && (
-												<span
-													style={{
-														color: "#d72c0d",
-														fontSize: "13px",
-														maxWidth: "200px",
-														overflow: "hidden",
-														textOverflow: "ellipsis",
-														whiteSpace: "nowrap",
-													}}
-													title={f.error}
-												>
-													{f.error}
-												</span>
-											)}
-											<button
-												type="button"
-												onClick={() => removeFile(f.id)}
-												disabled={isUploading}
-												style={{
-													background: "none",
-													border: "none",
-													cursor: isUploading ? "not-allowed" : "pointer",
-													padding: "4px",
-													borderRadius: "4px",
-													color: "#6d7175",
-													display: "flex",
-													alignItems: "center",
-													justifyContent: "center",
-												}}
-												aria-label={`Remove ${f.file.name}`}
-											>
-												<svg
-													viewBox="0 0 20 20"
-													width="16"
-													height="16"
-													fill="currentColor"
-													aria-hidden="true"
-												>
-													<path d="M6.707 5.293a1 1 0 0 0-1.414 1.414l3.293 3.293-3.293 3.293a1 1 0 1 0 1.414 1.414l3.293-3.293 3.293 3.293a1 1 0 0 0 1.414-1.414l-3.293-3.293 3.293-3.293a1 1 0 0 0-1.414-1.414l-3.293 3.293-3.293-3.293z" />
-												</svg>
-											</button>
-										</div>
+													Remove
+												</s-button>
+											</s-stack>
+										</s-stack>
 									</div>
 								))}
-							</div>
-						</div>
+							</s-box>
+						</s-stack>
 					)}
 
 					{/* Upload Button */}
@@ -708,3 +528,5 @@ export default function BulkUpload() {
 		</s-page>
 	);
 }
+
+export const headers = boundary.headers;

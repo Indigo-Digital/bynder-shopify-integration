@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import {
 	useFetcher,
@@ -60,7 +60,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 				fileDetailsMap = await getShopifyFileDetails(admin, fileIds);
 			} catch (error) {
 				console.error("Failed to fetch Shopify file details:", error);
-				// Continue without file details rather than failing completely
 			}
 		}
 	}
@@ -87,7 +86,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	};
 };
 
-export default function FilesPage() {
+export default function SyncedAssetsPage() {
 	const { shopConfig, syncedAssets, shop, pagination } =
 		useLoaderData<typeof loader>();
 	const [showPicker, setShowPicker] = useState(false);
@@ -113,22 +112,21 @@ export default function FilesPage() {
 		setSelectedTag(tag);
 	}, [searchParams]);
 
-	const handleAssetSelect = async (assetId: string) => {
-		setShowPicker(false); // Close modal immediately
+	const handleAssetSelect = useCallback(
+		async (assetId: string) => {
+			setShowPicker(false);
+			const encodedAssetId = encodeURIComponent(assetId);
+			fetcher.submit(
+				{ assetId },
+				{
+					method: "POST",
+					action: `/api/sync?assetId=${encodedAssetId}`,
+				}
+			);
+		},
+		[fetcher]
+	);
 
-		// URL encode the asset ID to handle special characters
-		const encodedAssetId = encodeURIComponent(assetId);
-
-		fetcher.submit(
-			{ assetId },
-			{
-				method: "POST",
-				action: `/api/sync?assetId=${encodedAssetId}`,
-			}
-		);
-	};
-
-	// Show success/error messages
 	const showSuccess =
 		fetcher.data && "success" in fetcher.data && fetcher.data.success;
 	const showError = fetcher.data && "error" in fetcher.data;
@@ -157,7 +155,6 @@ export default function FilesPage() {
 	// Filter assets based on search and filters
 	const filteredAssets = useMemo(() => {
 		return syncedAssets.filter((asset) => {
-			// Search filter
 			if (searchQuery) {
 				const query = searchQuery.toLowerCase();
 				const matchesId = asset.bynderAssetId.toLowerCase().includes(query);
@@ -170,12 +167,10 @@ export default function FilesPage() {
 				}
 			}
 
-			// Sync type filter
 			if (selectedSyncType !== "all" && asset.syncType !== selectedSyncType) {
 				return false;
 			}
 
-			// Tag filter
 			if (
 				selectedTag !== "all" &&
 				!asset.fileDetails?.bynderMetadata?.tags?.includes(selectedTag)
@@ -187,30 +182,34 @@ export default function FilesPage() {
 		});
 	}, [syncedAssets, searchQuery, selectedSyncType, selectedTag]);
 
-	// Debounced search update to URL
-	const updateSearchParams = (updates: Record<string, string>) => {
-		const params = new URLSearchParams(searchParams);
-		Object.entries(updates).forEach(([key, value]) => {
-			if (value && value !== "all") {
-				params.set(key, value);
-			} else {
-				params.delete(key);
+	const updateSearchParams = useCallback(
+		(updates: Record<string, string>) => {
+			const params = new URLSearchParams(searchParams);
+			Object.entries(updates).forEach(([key, value]) => {
+				if (value && value !== "all") {
+					params.set(key, value);
+				} else {
+					params.delete(key);
+				}
+			});
+			navigate(`?${params.toString()}`, { replace: true });
+		},
+		[navigate, searchParams]
+	);
+
+	const handleSearchChange = useCallback(
+		(value: string) => {
+			setSearchQuery(value);
+			if (debounceTimerRef.current) {
+				clearTimeout(debounceTimerRef.current);
 			}
-		});
-		navigate(`?${params.toString()}`, { replace: true });
-	};
+			debounceTimerRef.current = setTimeout(() => {
+				updateSearchParams({ search: value });
+			}, 500);
+		},
+		[updateSearchParams]
+	);
 
-	const handleSearchChange = (value: string) => {
-		setSearchQuery(value);
-		if (debounceTimerRef.current) {
-			clearTimeout(debounceTimerRef.current);
-		}
-		debounceTimerRef.current = setTimeout(() => {
-			updateSearchParams({ search: value });
-		}, 500);
-	};
-
-	// Cleanup debounce timer on unmount
 	useEffect(() => {
 		return () => {
 			if (debounceTimerRef.current) {
@@ -219,43 +218,52 @@ export default function FilesPage() {
 		};
 	}, []);
 
-	const handleSyncTypeChange = (value: string) => {
-		setSelectedSyncType(value);
-		updateSearchParams({ syncType: value });
-	};
+	const handleSyncTypeChange = useCallback(
+		(value: string) => {
+			setSelectedSyncType(value);
+			updateSearchParams({ syncType: value });
+		},
+		[updateSearchParams]
+	);
 
-	const handleTagChange = (value: string) => {
-		setSelectedTag(value);
-		updateSearchParams({ tag: value });
-	};
+	const handleTagChange = useCallback(
+		(value: string) => {
+			setSelectedTag(value);
+			updateSearchParams({ tag: value });
+		},
+		[updateSearchParams]
+	);
 
-	const handlePageChange = (newPage: number) => {
-		const params = new URLSearchParams(searchParams);
-		params.set("page", newPage.toString());
-		navigate(`?${params.toString()}`);
-	};
+	const handlePageChange = useCallback(
+		(newPage: number) => {
+			const params = new URLSearchParams(searchParams);
+			params.set("page", newPage.toString());
+			navigate(`?${params.toString()}`);
+		},
+		[navigate, searchParams]
+	);
 
-	const handlePreview = (asset: (typeof syncedAssets)[number]) => {
+	const handlePreview = useCallback((asset: (typeof syncedAssets)[number]) => {
 		if (asset.fileDetails) {
 			setPreviewAsset({ asset, file: asset.fileDetails });
 		}
-	};
+	}, []);
 
 	if (!shopConfig || !shopConfig.bynderBaseUrl) {
 		return (
-			<s-page heading="Bynder Files">
+			<s-page heading="Synced Assets">
 				<s-section>
-					<s-paragraph>
+					<s-banner tone="warning">
 						Please configure Bynder connection in{" "}
 						<s-link href="/app/settings">Settings</s-link>.
-					</s-paragraph>
+					</s-banner>
 				</s-section>
 			</s-page>
 		);
 	}
 
 	return (
-		<s-page heading="Bynder Files">
+		<s-page heading="Synced Assets">
 			<s-button
 				slot="primary-action"
 				onClick={() => setShowPicker(true)}
@@ -264,14 +272,21 @@ export default function FilesPage() {
 				{fetcher.state !== "idle" ? "Syncing..." : "Import from Bynder"}
 			</s-button>
 
+			{/* Info Banner */}
+			<s-banner tone="info">
+				This page shows assets synced from Bynder and tracked in the database.
+				For all files in Shopify, use the{" "}
+				<s-link href="/app/file-manager">File Manager</s-link>.
+			</s-banner>
+
 			{showSuccess && (
-				<s-banner tone="success">
+				<s-banner tone="success" dismissible>
 					Asset imported successfully! Refresh the page to see it in the list.
 				</s-banner>
 			)}
 
 			{showError && (
-				<s-banner tone="critical">
+				<s-banner tone="critical" dismissible>
 					Error importing asset:{" "}
 					{typeof fetcher.data === "object" &&
 					fetcher.data !== null &&
@@ -290,75 +305,27 @@ export default function FilesPage() {
 				/>
 			)}
 
-			<s-section heading="Synced Assets">
-				{/* Search and Filter Bar */}
+			<s-section heading="Bynder-Synced Assets">
+				{/* Filter Bar using Polaris components */}
 				{syncedAssets.length > 0 && (
-					<div
-						style={{
-							display: "flex",
-							flexWrap: "wrap",
-							gap: "1rem",
-							marginBottom: "1.5rem",
-							padding: "1rem",
-							backgroundColor: "#f9fafb",
-							borderRadius: "8px",
-						}}
-					>
-						<div style={{ flex: "1 1 300px", minWidth: "200px" }}>
-							<label
-								htmlFor="search-input"
-								style={{
-									display: "block",
-									marginBottom: "0.5rem",
-									fontSize: "0.875rem",
-									fontWeight: "500",
-									color: "#374151",
-								}}
-							>
-								Search
-							</label>
-							<input
-								id="search-input"
-								type="text"
-								value={searchQuery}
-								onChange={(e) => handleSearchChange(e.target.value)}
+					<s-stack direction="block" gap="base">
+						<s-stack direction="inline" gap="base" alignItems="end">
+							<s-search-field
+								label="Search"
 								placeholder="Search by asset ID or tags..."
-								style={{
-									width: "100%",
-									padding: "0.5rem 0.75rem",
-									border: "1px solid #d1d5db",
-									borderRadius: "6px",
-									fontSize: "0.875rem",
-								}}
+								value={searchQuery}
+								onInput={(e) =>
+									handleSearchChange((e.target as HTMLInputElement).value)
+								}
 							/>
-						</div>
 
-						{allSyncTypes.length > 0 && (
-							<div style={{ flex: "0 1 150px" }}>
-								<label
-									htmlFor="sync-type-filter"
-									style={{
-										display: "block",
-										marginBottom: "0.5rem",
-										fontSize: "0.875rem",
-										fontWeight: "500",
-										color: "#374151",
-									}}
-								>
-									Sync Type
-								</label>
-								<select
-									id="sync-type-filter"
+							{allSyncTypes.length > 0 && (
+								<s-select
+									label="Sync Type"
 									value={selectedSyncType}
-									onChange={(e) => handleSyncTypeChange(e.target.value)}
-									style={{
-										width: "100%",
-										padding: "0.5rem 0.75rem",
-										border: "1px solid #d1d5db",
-										borderRadius: "6px",
-										fontSize: "0.875rem",
-										backgroundColor: "white",
-									}}
+									onChange={(e) =>
+										handleSyncTypeChange((e.target as HTMLSelectElement).value)
+									}
 								>
 									<option value="all">All Types</option>
 									{allSyncTypes.map((type) => (
@@ -366,36 +333,16 @@ export default function FilesPage() {
 											{type}
 										</option>
 									))}
-								</select>
-							</div>
-						)}
+								</s-select>
+							)}
 
-						{allTags.length > 0 && (
-							<div style={{ flex: "0 1 150px" }}>
-								<label
-									htmlFor="tag-filter"
-									style={{
-										display: "block",
-										marginBottom: "0.5rem",
-										fontSize: "0.875rem",
-										fontWeight: "500",
-										color: "#374151",
-									}}
-								>
-									Tag
-								</label>
-								<select
-									id="tag-filter"
+							{allTags.length > 0 && (
+								<s-select
+									label="Tag"
 									value={selectedTag}
-									onChange={(e) => handleTagChange(e.target.value)}
-									style={{
-										width: "100%",
-										padding: "0.5rem 0.75rem",
-										border: "1px solid #d1d5db",
-										borderRadius: "6px",
-										fontSize: "0.875rem",
-										backgroundColor: "white",
-									}}
+									onChange={(e) =>
+										handleTagChange((e.target as HTMLSelectElement).value)
+									}
 								>
 									<option value="all">All Tags</option>
 									{allTags.map((tag) => (
@@ -403,331 +350,156 @@ export default function FilesPage() {
 											{tag}
 										</option>
 									))}
-								</select>
-							</div>
-						)}
-					</div>
-				)}
+								</s-select>
+							)}
+						</s-stack>
 
-				{/* Results count */}
-				{syncedAssets.length > 0 && (
-					<div
-						style={{
-							marginBottom: "1rem",
-							color: "#6b7280",
-							fontSize: "0.875rem",
-						}}
-					>
-						Showing {filteredAssets.length} of {pagination.total} assets
-					</div>
+						<s-text color="subdued">
+							Showing {filteredAssets.length} of {pagination.total} assets
+						</s-text>
+					</s-stack>
 				)}
 
 				{/* Assets Table */}
 				{syncedAssets.length === 0 ? (
-					<s-paragraph>
-						No assets synced yet. Click "Import from Bynder" to get started.
-					</s-paragraph>
+					<s-box padding="large" background="subdued" borderRadius="base">
+						<s-stack direction="block" gap="base" alignItems="center">
+							<s-text>No assets synced yet.</s-text>
+							<s-button onClick={() => setShowPicker(true)}>
+								Import from Bynder
+							</s-button>
+						</s-stack>
+					</s-box>
 				) : filteredAssets.length === 0 ? (
-					<s-paragraph>
-						No assets match your filters. Try adjusting your search criteria.
-					</s-paragraph>
+					<s-box padding="large" background="subdued" borderRadius="base">
+						<s-text>
+							No assets match your filters. Try adjusting your search criteria.
+						</s-text>
+					</s-box>
 				) : (
 					<>
-						<div style={{ overflowX: "auto" }}>
-							<table style={{ width: "100%", borderCollapse: "collapse" }}>
-								<thead>
-									<tr style={{ borderBottom: "2px solid #e5e7eb" }}>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-												color: "#374151",
-												fontSize: "0.875rem",
-											}}
-										>
-											Preview
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-												color: "#374151",
-												fontSize: "0.875rem",
-											}}
-										>
-											Asset ID
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-												color: "#374151",
-												fontSize: "0.875rem",
-											}}
-										>
-											Tags
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-												color: "#374151",
-												fontSize: "0.875rem",
-											}}
-										>
-											Sync Type
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-												color: "#374151",
-												fontSize: "0.875rem",
-											}}
-										>
-											Synced At
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-												color: "#374151",
-												fontSize: "0.875rem",
-											}}
-										>
-											Actions
-										</th>
-									</tr>
-								</thead>
-								<tbody>
-									{filteredAssets.map(
-										(asset: (typeof syncedAssets)[number]) => {
-											const fileDetails = asset.fileDetails;
-											const thumbnailUrl = fileDetails?.thumbnailUrl;
-											const tags = fileDetails?.bynderMetadata?.tags || [];
+						<s-table>
+							<s-table-header-row>
+								<s-table-header listSlot="primary">Preview</s-table-header>
+								<s-table-header listSlot="secondary">Asset ID</s-table-header>
+								<s-table-header>Tags</s-table-header>
+								<s-table-header>Sync Type</s-table-header>
+								<s-table-header>Synced At</s-table-header>
+								<s-table-header>Actions</s-table-header>
+							</s-table-header-row>
+							<s-table-body>
+								{filteredAssets.map((asset: (typeof syncedAssets)[number]) => {
+									const fileDetails = asset.fileDetails;
+									const thumbnailUrl = fileDetails?.thumbnailUrl;
+									const tags = fileDetails?.bynderMetadata?.tags || [];
 
-											return (
-												<tr
-													key={asset.id}
-													style={{
-														borderBottom: "1px solid #e5e7eb",
-														cursor: fileDetails ? "pointer" : "default",
-													}}
-													onClick={() => fileDetails && handlePreview(asset)}
-												>
-													<td style={{ padding: "0.75rem" }}>
-														{thumbnailUrl ? (
-															<img
-																src={thumbnailUrl}
-																alt={fileDetails?.altText || "Preview"}
-																style={{
-																	width: "60px",
-																	height: "60px",
-																	objectFit: "cover",
-																	borderRadius: "4px",
-																	border: "1px solid #e5e7eb",
-																}}
-															/>
-														) : (
-															<div
-																style={{
-																	width: "60px",
-																	height: "60px",
-																	backgroundColor: "#f3f4f6",
-																	borderRadius: "4px",
-																	display: "flex",
-																	alignItems: "center",
-																	justifyContent: "center",
-																	border: "1px solid #e5e7eb",
-																}}
-															>
-																<svg
-																	width="24"
-																	height="24"
-																	viewBox="0 0 24 24"
-																	fill="none"
-																	stroke="currentColor"
-																	strokeWidth="2"
-																	style={{ color: "#9ca3af" }}
-																	role="img"
-																	aria-label="File icon"
-																>
-																	<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-																	<polyline points="14 2 14 8 20 8" />
-																</svg>
-															</div>
-														)}
-													</td>
-													<td style={{ padding: "0.75rem" }}>
-														<span
-															style={{
-																fontFamily: "monospace",
-																fontSize: "0.875rem",
-															}}
+									return (
+										<s-table-row
+											key={asset.id}
+											clickDelegate={`preview-${asset.id}`}
+										>
+											<s-table-cell>
+												{thumbnailUrl ? (
+													<s-thumbnail
+														src={thumbnailUrl}
+														alt={fileDetails?.altText || "Preview"}
+														size="small"
+													/>
+												) : (
+													<s-box
+														minInlineSize="40px"
+														minBlockSize="40px"
+														background="subdued"
+														borderRadius="small"
+													>
+														<s-stack
+															alignItems="center"
+															justifyContent="center"
+															blockSize="40px"
 														>
-															{asset.bynderAssetId}
-														</span>
-													</td>
-													<td style={{ padding: "0.75rem" }}>
-														{tags.length > 0 ? (
-															<div
-																style={{
-																	display: "flex",
-																	flexWrap: "wrap",
-																	gap: "0.25rem",
-																}}
-															>
-																{tags.slice(0, 3).map((tag: string) => (
-																	<span
-																		key={tag}
-																		style={{
-																			backgroundColor: "#e5e7eb",
-																			color: "#374151",
-																			padding: "0.125rem 0.5rem",
-																			borderRadius: "9999px",
-																			fontSize: "0.75rem",
-																		}}
-																	>
-																		{tag}
-																	</span>
-																))}
-																{tags.length > 3 && (
-																	<span
-																		style={{
-																			color: "#6b7280",
-																			fontSize: "0.75rem",
-																		}}
-																	>
-																		+{tags.length - 3}
-																	</span>
-																)}
-															</div>
-														) : (
-															<span
-																style={{
-																	color: "#9ca3af",
-																	fontSize: "0.875rem",
-																}}
-															>
-																No tags
-															</span>
+															<s-icon type="file" color="subdued" />
+														</s-stack>
+													</s-box>
+												)}
+											</s-table-cell>
+											<s-table-cell>
+												<s-text>{asset.bynderAssetId}</s-text>
+											</s-table-cell>
+											<s-table-cell>
+												{tags.length > 0 ? (
+													<s-stack direction="inline" gap="small-200">
+														{tags.slice(0, 2).map((tag: string) => (
+															<s-chip key={tag} color="base">
+																{tag}
+															</s-chip>
+														))}
+														{tags.length > 2 && (
+															<s-text color="subdued">
+																+{tags.length - 2}
+															</s-text>
 														)}
-													</td>
-													<td style={{ padding: "0.75rem" }}>
-														<span style={{ fontSize: "0.875rem" }}>
-															{asset.syncType}
-														</span>
-													</td>
-													<td style={{ padding: "0.75rem" }}>
-														<span style={{ fontSize: "0.875rem" }}>
-															{new Date(asset.syncedAt).toLocaleString()}
-														</span>
-													</td>
-													<td style={{ padding: "0.75rem" }}>
-														{fileDetails ? (
-															<button
-																type="button"
-																onClick={(e) => {
-																	e.stopPropagation();
-																	handlePreview(asset);
-																}}
-																style={{
-																	background: "none",
-																	border: "none",
-																	color: "#2563eb",
-																	cursor: "pointer",
-																	textDecoration: "underline",
-																	fontSize: "0.875rem",
-																}}
-															>
-																Preview
-															</button>
-														) : (
-															<span
-																style={{
-																	color: "#9ca3af",
-																	fontSize: "0.875rem",
-																}}
-															>
-																No details
-															</span>
-														)}
-													</td>
-												</tr>
-											);
-										}
-									)}
-								</tbody>
-							</table>
-						</div>
+													</s-stack>
+												) : (
+													<s-text color="subdued">No tags</s-text>
+												)}
+											</s-table-cell>
+											<s-table-cell>
+												<s-badge tone="neutral">{asset.syncType}</s-badge>
+											</s-table-cell>
+											<s-table-cell>
+												<s-text>
+													{new Date(asset.syncedAt).toLocaleDateString()}
+												</s-text>
+											</s-table-cell>
+											<s-table-cell>
+												{fileDetails ? (
+													<s-button
+														id={`preview-${asset.id}`}
+														variant="tertiary"
+														onClick={() => handlePreview(asset)}
+													>
+														Preview
+													</s-button>
+												) : (
+													<s-text color="subdued">No details</s-text>
+												)}
+											</s-table-cell>
+										</s-table-row>
+									);
+								})}
+							</s-table-body>
+						</s-table>
 
-						{/* Pagination */}
+						{/* Pagination using Polaris */}
 						{pagination.totalPages > 1 && (
-							<div
-								style={{
-									display: "flex",
-									justifyContent: "space-between",
-									alignItems: "center",
-									marginTop: "1.5rem",
-									paddingTop: "1rem",
-									borderTop: "1px solid #e5e7eb",
-								}}
+							<s-stack
+								direction="inline"
+								gap="base"
+								justifyContent="space-between"
+								alignItems="center"
+								padding="base"
 							>
-								<div style={{ color: "#6b7280", fontSize: "0.875rem" }}>
+								<s-text color="subdued">
 									Page {pagination.page} of {pagination.totalPages} (
 									{pagination.total} total)
-								</div>
-								<div style={{ display: "flex", gap: "0.5rem" }}>
-									<button
-										type="button"
+								</s-text>
+								<s-stack direction="inline" gap="small">
+									<s-button
+										variant="secondary"
 										onClick={() => handlePageChange(pagination.page - 1)}
 										disabled={pagination.page <= 1}
-										style={{
-											padding: "0.5rem 1rem",
-											border: "1px solid #d1d5db",
-											borderRadius: "6px",
-											backgroundColor:
-												pagination.page <= 1 ? "#f9fafb" : "white",
-											color: pagination.page <= 1 ? "#9ca3af" : "#374151",
-											cursor: pagination.page <= 1 ? "not-allowed" : "pointer",
-											fontSize: "0.875rem",
-										}}
 									>
 										Previous
-									</button>
-									<button
-										type="button"
+									</s-button>
+									<s-button
+										variant="secondary"
 										onClick={() => handlePageChange(pagination.page + 1)}
 										disabled={pagination.page >= pagination.totalPages}
-										style={{
-											padding: "0.5rem 1rem",
-											border: "1px solid #d1d5db",
-											borderRadius: "6px",
-											backgroundColor:
-												pagination.page >= pagination.totalPages
-													? "#f9fafb"
-													: "white",
-											color:
-												pagination.page >= pagination.totalPages
-													? "#9ca3af"
-													: "#374151",
-											cursor:
-												pagination.page >= pagination.totalPages
-													? "not-allowed"
-													: "pointer",
-											fontSize: "0.875rem",
-										}}
 									>
 										Next
-									</button>
-								</div>
-							</div>
+									</s-button>
+								</s-stack>
+							</s-stack>
 						)}
 					</>
 				)}

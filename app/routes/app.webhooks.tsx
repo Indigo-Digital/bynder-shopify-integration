@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import prisma from "../db.server.js";
@@ -36,10 +36,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		};
 	}
 
-	// Get webhook subscription (most recent one)
 	const webhookSubscription = shopConfig.webhookSubscriptions[0] || null;
 
-	// Get webhook stats (handle case where table doesn't exist yet)
 	let totalEvents = 0;
 	let successCount = 0;
 	let failureCount = 0;
@@ -64,7 +62,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	let lastSuccessfulEvent: { createdAt: Date } | null = null;
 
 	try {
-		// Get pagination info
 		const url = new URL(request.url);
 		const page = parseInt(url.searchParams.get("page") || "1", 10);
 		const pageSize = 20;
@@ -77,25 +74,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		totalEvents = totalEventsCount;
 
 		successCount = await prisma.webhookEvent.count({
-			where: {
-				shopId: shopConfig.id,
-				status: "success",
-			},
+			where: { shopId: shopConfig.id, status: "success" },
 		});
 
 		failureCount = await prisma.webhookEvent.count({
-			where: {
-				shopId: shopConfig.id,
-				status: "failed",
-			},
+			where: { shopId: shopConfig.id, status: "failed" },
 		});
 
 		const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
 		eventsLast24h = await prisma.webhookEvent.count({
-			where: {
-				shopId: shopConfig.id,
-				createdAt: { gte: last24Hours },
-			},
+			where: { shopId: shopConfig.id, createdAt: { gte: last24Hours } },
 		});
 
 		lastEvent = await prisma.webhookEvent.findFirst({
@@ -103,16 +91,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 			orderBy: { createdAt: "desc" },
 		});
 
-		// Get last successful event for health check
 		lastSuccessfulEvent = await prisma.webhookEvent.findFirst({
-			where: {
-				shopId: shopConfig.id,
-				status: "success",
-			},
+			where: { shopId: shopConfig.id, status: "success" },
 			orderBy: { createdAt: "desc" },
 		});
 
-		// Get recent events with pagination
 		recentEvents = await prisma.webhookEvent.findMany({
 			where: { shopId: shopConfig.id },
 			orderBy: { createdAt: "desc" },
@@ -127,7 +110,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 			totalPages: Math.ceil(totalEventsCount / pageSize),
 		};
 	} catch (error) {
-		// Table doesn't exist yet (migration not run) - return empty stats
 		console.warn(
 			"WebhookEvent table not found, migration may not have been run:",
 			error
@@ -166,10 +148,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const shopConfig = await prisma.shop.findUnique({
 			where: { shop },
 			include: {
-				webhookSubscriptions: {
-					orderBy: { createdAt: "desc" },
-					take: 1,
-				},
+				webhookSubscriptions: { orderBy: { createdAt: "desc" }, take: 1 },
 			},
 		});
 
@@ -181,13 +160,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const isActivating = formData.get("active") === "true";
 
 		try {
-			// Initialize Bynder client
 			const bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
-
-			// Construct webhook URL
 			const webhookUrl = `${env.SHOPIFY_APP_URL}/api/bynder/webhooks`;
-
-			// Get event types from form (default to asset.tagged, media.tagged)
 			const eventTypesInput = formData.get("eventTypes")?.toString() || "";
 			const eventTypes =
 				eventTypesInput.length > 0
@@ -195,7 +169,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 					: ["asset.tagged", "media.tagged"];
 
 			if (isActivating) {
-				// Create or update webhook subscription in Bynder
 				let bynderWebhook: {
 					id: string;
 					url: string;
@@ -203,7 +176,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 					active: boolean;
 				};
 				if (existingSubscription?.bynderWebhookId) {
-					// Update existing webhook in Bynder
 					bynderWebhook = await updateWebhookSubscription(
 						bynderClient,
 						existingSubscription.bynderWebhookId,
@@ -211,7 +183,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 						eventTypes
 					);
 				} else {
-					// Create new webhook subscription in Bynder
 					bynderWebhook = await createWebhookSubscription(
 						bynderClient,
 						webhookUrl,
@@ -219,9 +190,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 					);
 				}
 
-				// Store in database
 				if (existingSubscription) {
-					// Update existing subscription
 					await prisma.webhookSubscription.update({
 						where: { id: existingSubscription.id },
 						data: {
@@ -232,7 +201,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 						},
 					});
 				} else {
-					// Create new subscription
 					await prisma.webhookSubscription.create({
 						data: {
 							shopId: shopConfig.id,
@@ -246,9 +214,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 				return { success: true, message: "Webhook activated" };
 			} else {
-				// Deactivate webhook
 				if (existingSubscription?.active) {
-					// Delete from Bynder
 					try {
 						await deleteWebhookSubscription(
 							bynderClient,
@@ -256,10 +222,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 						);
 					} catch (error) {
 						console.error("Failed to delete webhook from Bynder:", error);
-						// Continue to deactivate in database even if Bynder deletion fails
 					}
 
-					// Update in database
 					await prisma.webhookSubscription.update({
 						where: { id: existingSubscription.id },
 						data: { active: false },
@@ -303,15 +267,17 @@ export default function WebhooksPage() {
 	const isSubmitting = fetcher.state !== "idle";
 	const isTesting = testFetcher.state !== "idle";
 
-	const toggleExpand = (eventId: string) => {
-		const newExpanded = new Set(expandedEvents);
-		if (newExpanded.has(eventId)) {
-			newExpanded.delete(eventId);
-		} else {
-			newExpanded.add(eventId);
-		}
-		setExpandedEvents(newExpanded);
-	};
+	const toggleExpand = useCallback((eventId: string) => {
+		setExpandedEvents((prev) => {
+			const next = new Set(prev);
+			if (next.has(eventId)) {
+				next.delete(eventId);
+			} else {
+				next.add(eventId);
+			}
+			return next;
+		});
+	}, []);
 
 	const filteredEvents = recentEvents.filter(
 		(event: (typeof recentEvents)[number]) => {
@@ -324,7 +290,7 @@ export default function WebhooksPage() {
 		}
 	);
 
-	const handleCopyUrl = async () => {
+	const handleCopyUrl = useCallback(async () => {
 		if (!webhookUrl) return;
 		try {
 			await navigator.clipboard.writeText(webhookUrl);
@@ -333,31 +299,31 @@ export default function WebhooksPage() {
 		} catch (error) {
 			console.error("Failed to copy URL:", error);
 		}
-	};
+	}, [webhookUrl]);
 
-	const handleTestWebhook = () => {
+	const handleTestWebhook = useCallback(() => {
 		testFetcher.submit(
 			{},
 			{ method: "POST", action: "/api/bynder/webhooks/test-endpoint" }
 		);
-	};
+	}, [testFetcher]);
 
-	const toggleEventType = (eventType: string) => {
-		if (selectedEvents.includes(eventType)) {
-			setSelectedEvents(selectedEvents.filter((e) => e !== eventType));
-		} else {
-			setSelectedEvents([...selectedEvents, eventType]);
-		}
-	};
+	const toggleEventType = useCallback((eventType: string) => {
+		setSelectedEvents((prev) =>
+			prev.includes(eventType)
+				? prev.filter((e) => e !== eventType)
+				: [...prev, eventType]
+		);
+	}, []);
 
 	if (!shopConfig || !shopConfig.bynderBaseUrl) {
 		return (
-			<s-page heading="Web Hook">
+			<s-page heading="Webhooks">
 				<s-section>
-					<s-paragraph>
+					<s-banner tone="warning">
 						Please configure Bynder in{" "}
 						<s-link href="/app/settings">Settings</s-link> first.
-					</s-paragraph>
+					</s-banner>
 				</s-section>
 			</s-page>
 		);
@@ -366,14 +332,14 @@ export default function WebhooksPage() {
 	const isActive = webhookSubscription?.active || false;
 
 	return (
-		<s-page heading="Web Hook">
+		<s-page heading="Webhooks">
 			{fetcher.data?.success && (
-				<s-banner tone="success">
+				<s-banner tone="success" dismissible>
 					{fetcher.data.message || "Webhook updated successfully!"}
 				</s-banner>
 			)}
 			{fetcher.data?.error && (
-				<s-banner tone="critical">
+				<s-banner tone="critical" dismissible>
 					Error:{" "}
 					{typeof fetcher.data.error === "string"
 						? fetcher.data.error
@@ -381,66 +347,45 @@ export default function WebhooksPage() {
 				</s-banner>
 			)}
 
-			{/* Webhook Activation Section */}
+			{/* Webhook Status Section */}
 			<s-section heading="Webhook Status">
 				<s-stack direction="block" gap="base">
-					<s-paragraph>
+					<s-text>
 						When activated, this webhook listens to Bynder for new assets that
 						match your sync criteria (defined in Settings) and automatically
 						processes them into Shopify using the background job.
-					</s-paragraph>
+					</s-text>
 
-					{/* Status Display */}
 					<s-stack direction="inline" gap="base" alignItems="center">
 						<s-text>
-							<strong>Status:</strong>{" "}
-							<span
-								style={{
-									padding: "0.25rem 0.5rem",
-									borderRadius: "4px",
-									fontSize: "0.875rem",
-									fontWeight: "600",
-									backgroundColor: isActive ? "#d4edda" : "#f8d7da",
-									color: isActive ? "#155724" : "#721c24",
-								}}
-							>
-								{isActive ? "✓ Active" : "✗ Inactive"}
-							</span>
+							<strong>Status:</strong>
 						</s-text>
+						<s-badge tone={isActive ? "success" : "critical"}>
+							{isActive ? "✓ Active" : "✗ Inactive"}
+						</s-badge>
 						{stats?.lastSuccessfulEventTime && (
-							<div style={{ fontSize: "0.875rem", color: "#666" }}>
-								<s-text>
-									Last successful event:{" "}
-									{new Date(stats.lastSuccessfulEventTime).toLocaleString()}
-								</s-text>
-							</div>
+							<s-text color="subdued">
+								Last successful event:{" "}
+								{new Date(stats.lastSuccessfulEventTime).toLocaleString()}
+							</s-text>
 						)}
 					</s-stack>
 
-					{/* Webhook Endpoint URL with Copy */}
-					<s-stack direction="block" gap="base">
+					{/* Webhook URL */}
+					<s-stack direction="block" gap="small">
 						<s-text>
 							<strong>Webhook Endpoint URL:</strong>
 						</s-text>
 						<s-stack direction="inline" gap="base" alignItems="center">
-							<div
-								style={{
-									flex: 1,
-									fontFamily: "monospace",
-									fontSize: "0.875rem",
-									wordBreak: "break-all",
-									padding: "0.75rem",
-									border: "1px solid #ddd",
-									borderRadius: "4px",
-								}}
+							<s-box
+								padding="small"
+								borderWidth="base"
+								borderRadius="base"
+								background="subdued"
 							>
-								{webhookUrl}
-							</div>
-							<s-button
-								variant="secondary"
-								onClick={handleCopyUrl}
-								disabled={copied || !webhookUrl}
-							>
+								<s-text>{webhookUrl}</s-text>
+							</s-box>
+							<s-button variant="secondary" onClick={handleCopyUrl}>
 								{copied ? "Copied!" : "Copy URL"}
 							</s-button>
 						</s-stack>
@@ -448,40 +393,21 @@ export default function WebhooksPage() {
 
 					{/* Event Type Selection */}
 					{!isActive && (
-						<fetcher.Form method="POST">
-							<input type="hidden" name="intent" value="toggle_webhook" />
-							<input type="hidden" name="active" value="true" />
-							<input
-								type="hidden"
-								name="eventTypes"
-								value={selectedEvents.join(",")}
-							/>
-							<s-stack direction="block" gap="base">
-								<s-text>
-									<strong>Event Types to Subscribe To:</strong>
-								</s-text>
-								<s-stack direction="inline" gap="base">
-									{["asset.tagged", "media.tagged"].map((eventType) => (
-										<label
-											key={eventType}
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "0.5rem",
-												cursor: "pointer",
-											}}
-										>
-											<input
-												type="checkbox"
-												checked={selectedEvents.includes(eventType)}
-												onChange={() => toggleEventType(eventType)}
-											/>
-											<s-text>{eventType}</s-text>
-										</label>
-									))}
-								</s-stack>
+						<s-stack direction="block" gap="small">
+							<s-text>
+								<strong>Event Types to Subscribe To:</strong>
+							</s-text>
+							<s-stack direction="inline" gap="base">
+								{["asset.tagged", "media.tagged"].map((eventType) => (
+									<s-checkbox
+										key={eventType}
+										label={eventType}
+										checked={selectedEvents.includes(eventType)}
+										onChange={() => toggleEventType(eventType)}
+									/>
+								))}
 							</s-stack>
-						</fetcher.Form>
+						</s-stack>
 					)}
 
 					{/* Action Buttons */}
@@ -498,17 +424,24 @@ export default function WebhooksPage() {
 								name="eventTypes"
 								value={selectedEvents.join(",")}
 							/>
-							<s-button
-								type="submit"
-								variant={isActive ? "secondary" : "primary"}
-								disabled={isSubmitting}
-							>
-								{isSubmitting
-									? "Updating..."
-									: isActive
-										? "Deactivate"
-										: "Activate"}
-							</s-button>
+							{isActive ? (
+								<s-button
+									type="submit"
+									variant="secondary"
+									tone="critical"
+									disabled={isSubmitting}
+								>
+									{isSubmitting ? "Updating..." : "Deactivate"}
+								</s-button>
+							) : (
+								<s-button
+									type="submit"
+									variant="primary"
+									disabled={isSubmitting}
+								>
+									{isSubmitting ? "Updating..." : "Activate"}
+								</s-button>
+							)}
 						</fetcher.Form>
 						{isActive && (
 							<s-button
@@ -524,12 +457,12 @@ export default function WebhooksPage() {
 					{/* Test Results */}
 					{testFetcher.data &&
 						(testFetcher.data.success ? (
-							<s-banner tone="success">
+							<s-banner tone="success" dismissible>
 								{testFetcher.data.message ||
 									"Webhook test completed successfully!"}
 							</s-banner>
 						) : (
-							<s-banner tone="critical">
+							<s-banner tone="critical" dismissible>
 								Test failed:{" "}
 								{typeof testFetcher.data.error === "string"
 									? testFetcher.data.error
@@ -539,13 +472,8 @@ export default function WebhooksPage() {
 
 					{/* Subscription Details */}
 					{webhookSubscription && (
-						<s-box
-							padding="base"
-							borderWidth="base"
-							borderRadius="base"
-							background="subdued"
-						>
-							<s-stack direction="block" gap="base">
+						<s-box padding="base" background="subdued" borderRadius="base">
+							<s-stack direction="block" gap="small">
 								<s-text>
 									<strong>Subscription Details:</strong>
 								</s-text>
@@ -569,30 +497,41 @@ export default function WebhooksPage() {
 			{/* Stats Section */}
 			{stats && (
 				<s-section heading="Statistics">
-					<s-stack direction="inline" gap="base">
+					<s-grid
+						gridTemplateColumns="repeat(auto-fit, minmax(140px, 1fr))"
+						gap="base"
+					>
 						<s-box padding="base" borderWidth="base" borderRadius="base">
-							<s-text>Total Events</s-text>
-							<s-heading>{stats.totalEvents}</s-heading>
+							<s-stack direction="block" gap="small-200">
+								<s-text color="subdued">Total Events</s-text>
+								<s-heading>{stats.totalEvents}</s-heading>
+							</s-stack>
 						</s-box>
 						<s-box padding="base" borderWidth="base" borderRadius="base">
-							<s-text>Success Rate</s-text>
-							<s-heading>
-								{stats.successRate !== null ? `${stats.successRate}%` : "N/A"}
-							</s-heading>
+							<s-stack direction="block" gap="small-200">
+								<s-text color="subdued">Success Rate</s-text>
+								<s-heading>
+									{stats.successRate !== null ? `${stats.successRate}%` : "N/A"}
+								</s-heading>
+							</s-stack>
 						</s-box>
 						<s-box padding="base" borderWidth="base" borderRadius="base">
-							<s-text>Events Last 24h</s-text>
-							<s-heading>{stats.eventsLast24h}</s-heading>
+							<s-stack direction="block" gap="small-200">
+								<s-text color="subdued">Events Last 24h</s-text>
+								<s-heading>{stats.eventsLast24h}</s-heading>
+							</s-stack>
 						</s-box>
 						{stats.lastEventTime && (
 							<s-box padding="base" borderWidth="base" borderRadius="base">
-								<s-text>Last Event</s-text>
-								<s-heading>
-									{new Date(stats.lastEventTime).toLocaleString()}
-								</s-heading>
+								<s-stack direction="block" gap="small-200">
+									<s-text color="subdued">Last Event</s-text>
+									<s-text>
+										{new Date(stats.lastEventTime).toLocaleString()}
+									</s-text>
+								</s-stack>
 							</s-box>
 						)}
-					</s-stack>
+					</s-grid>
 				</s-section>
 			)}
 
@@ -600,8 +539,8 @@ export default function WebhooksPage() {
 			<s-section heading="Recent Events">
 				<s-stack direction="block" gap="base">
 					{/* Filters */}
-					<s-stack direction="block" gap="base">
-						<s-stack direction="inline" gap="base">
+					<s-stack direction="inline" gap="base" alignItems="end">
+						<s-button-group>
 							<s-button
 								variant={statusFilter === "all" ? "primary" : "secondary"}
 								onClick={() => setStatusFilter("all")}
@@ -620,250 +559,143 @@ export default function WebhooksPage() {
 							>
 								Failed ({stats?.failureCount || 0})
 							</s-button>
-						</s-stack>
+						</s-button-group>
 						<s-text-field
 							label="Filter by Asset ID"
+							labelAccessibilityVisibility="exclusive"
 							value={assetIdFilter}
-							onChange={(e) => {
-								const target = e.currentTarget;
-								if (target) {
-									setAssetIdFilter(target.value);
-								}
-							}}
-							placeholder="Enter asset ID to filter..."
+							onInput={(e) =>
+								setAssetIdFilter((e.target as HTMLInputElement).value)
+							}
+							placeholder="Enter asset ID..."
 						/>
 					</s-stack>
 
 					{/* Events Table */}
 					{filteredEvents.length === 0 ? (
-						<s-paragraph>No webhook events yet.</s-paragraph>
+						<s-box padding="large" background="subdued" borderRadius="base">
+							<s-text>No webhook events yet.</s-text>
+						</s-box>
 					) : (
-						<div style={{ overflowX: "auto" }}>
-							<table
-								style={{
-									width: "100%",
-									borderCollapse: "collapse",
-									fontSize: "0.875rem",
-								}}
-							>
-								<thead>
-									<tr
-										style={{
-											backgroundColor: "#f5f5f5",
-											borderBottom: "2px solid #ddd",
-										}}
-									>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-											}}
-										>
-											Timestamp
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-											}}
-										>
-											Event Type
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-											}}
-										>
-											Asset ID
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "left",
-												fontWeight: "600",
-											}}
-										>
-											Status
-										</th>
-										<th
-											style={{
-												padding: "0.75rem",
-												textAlign: "center",
-												fontWeight: "600",
-											}}
-										>
-											Actions
-										</th>
-									</tr>
-								</thead>
-								<tbody>
-									{filteredEvents.map(
-										(event: (typeof recentEvents)[number], index: number) => {
-											const isExpanded = expandedEvents.has(event.id);
-											return (
-												<>
-													<tr
-														key={event.id}
-														style={{
-															borderBottom: "1px solid #eee",
-															backgroundColor:
-																index % 2 === 0 ? "#fff" : "#fafafa",
-														}}
+						<s-table>
+							<s-table-header-row>
+								<s-table-header listSlot="primary">Timestamp</s-table-header>
+								<s-table-header>Event Type</s-table-header>
+								<s-table-header listSlot="secondary">Asset ID</s-table-header>
+								<s-table-header>Status</s-table-header>
+								<s-table-header>Actions</s-table-header>
+							</s-table-header-row>
+							<s-table-body>
+								{filteredEvents.map((event: (typeof recentEvents)[number]) => {
+									const isExpanded = expandedEvents.has(event.id);
+									return (
+										<s-table-row key={event.id}>
+											<s-table-cell>
+												<s-text>
+													{new Date(event.createdAt).toLocaleString()}
+												</s-text>
+											</s-table-cell>
+											<s-table-cell>
+												<s-badge tone="neutral">{event.eventType}</s-badge>
+											</s-table-cell>
+											<s-table-cell>
+												<s-text>{event.assetId || "-"}</s-text>
+											</s-table-cell>
+											<s-table-cell>
+												<s-badge
+													tone={
+														event.status === "success" ? "success" : "critical"
+													}
+												>
+													{event.status}
+												</s-badge>
+											</s-table-cell>
+											<s-table-cell>
+												<s-button
+													variant="tertiary"
+													onClick={() => toggleExpand(event.id)}
+												>
+													{isExpanded ? "Hide" : "Details"}
+												</s-button>
+												{isExpanded && (
+													<s-box
+														padding="small"
+														background="subdued"
+														borderRadius="small"
 													>
-														<td
-															style={{
-																padding: "0.75rem",
-																whiteSpace: "nowrap",
-															}}
-														>
-															{new Date(event.createdAt).toLocaleString()}
-														</td>
-														<td style={{ padding: "0.75rem" }}>
-															{event.eventType}
-														</td>
-														<td style={{ padding: "0.75rem" }}>
-															{event.assetId || "-"}
-														</td>
-														<td style={{ padding: "0.75rem" }}>
-															<span
+														<s-stack direction="block" gap="small">
+															{event.error && (
+																<s-badge tone="critical">
+																	Error: {event.error}
+																</s-badge>
+															)}
+															{event.processedAt && (
+																<s-text>
+																	<strong>Processed:</strong>{" "}
+																	{new Date(event.processedAt).toLocaleString()}
+																</s-text>
+															)}
+															<s-text>
+																<strong>Payload:</strong>
+															</s-text>
+															<div
 																style={{
-																	padding: "0.25rem 0.5rem",
-																	borderRadius: "4px",
-																	fontSize: "0.75rem",
-																	fontWeight: "600",
-																	textTransform: "uppercase",
+																	padding: "8px",
 																	backgroundColor:
-																		event.status === "success"
-																			? "#d4edda"
-																			: "#f8d7da",
-																	color:
-																		event.status === "success"
-																			? "#155724"
-																			: "#721c24",
+																		"var(--p-color-bg-surface-secondary)",
+																	borderRadius: "4px",
+																	overflow: "auto",
+																	maxHeight: "200px",
 																}}
 															>
-																{event.status}
-															</span>
-														</td>
-														<td
-															style={{
-																padding: "0.75rem",
-																textAlign: "center",
-															}}
-														>
-															<button
-																type="button"
-																onClick={() => toggleExpand(event.id)}
-																style={{
-																	background: "none",
-																	border: "none",
-																	color: "#0066cc",
-																	cursor: "pointer",
-																	padding: "0.25rem 0.5rem",
-																	fontSize: "0.875rem",
-																	textDecoration: "underline",
-																}}
-															>
-																{isExpanded ? "Hide Details" : "Show Details"}
-															</button>
-														</td>
-													</tr>
-													{isExpanded && (
-														<tr
-															key={`${event.id}-details`}
-															style={{
-																backgroundColor: "#f9f9f9",
-															}}
-														>
-															<td colSpan={5} style={{ padding: "1rem" }}>
-																<s-stack direction="block" gap="base">
-																	{event.error && (
-																		<s-box
-																			padding="base"
-																			borderWidth="base"
-																			borderRadius="base"
-																			background="subdued"
-																		>
-																			<s-text tone="critical">
-																				<strong>Error:</strong> {event.error}
-																			</s-text>
-																		</s-box>
-																	)}
-																	{event.processedAt && (
-																		<s-text>
-																			<strong>Processed At:</strong>{" "}
-																			{new Date(
-																				event.processedAt
-																			).toLocaleString()}
-																		</s-text>
-																	)}
-																	<s-text>
-																		<strong>Payload:</strong>
-																	</s-text>
-																	<s-box
-																		padding="base"
-																		borderWidth="base"
-																		borderRadius="base"
-																		background="subdued"
-																	>
-																		<pre
-																			style={{
-																				margin: 0,
-																				fontSize: "0.75rem",
-																				overflow: "auto",
-																				maxHeight: "400px",
-																			}}
-																		>
-																			<code>
-																				{JSON.stringify(
-																					JSON.parse(event.payload),
-																					null,
-																					2
-																				)}
-																			</code>
-																		</pre>
-																	</s-box>
-																</s-stack>
-															</td>
-														</tr>
-													)}
-												</>
-											);
-										}
-									)}
-								</tbody>
-							</table>
-						</div>
+																<pre style={{ margin: 0, fontSize: "0.75rem" }}>
+																	<code>
+																		{JSON.stringify(
+																			JSON.parse(event.payload),
+																			null,
+																			2
+																		)}
+																	</code>
+																</pre>
+															</div>
+														</s-stack>
+													</s-box>
+												)}
+											</s-table-cell>
+										</s-table-row>
+									);
+								})}
+							</s-table-body>
+						</s-table>
 					)}
 
 					{/* Pagination */}
 					{pagination && pagination.totalPages > 1 && (
-						<s-stack direction="inline" gap="base" alignItems="center">
-							<s-text>
+						<s-stack
+							direction="inline"
+							gap="base"
+							justifyContent="space-between"
+							alignItems="center"
+						>
+							<s-text color="subdued">
 								Page {pagination.page} of {pagination.totalPages} (
 								{pagination.total} total events)
 							</s-text>
-							<s-stack direction="inline" gap="base">
-								{pagination.page > 1 && (
-									<s-button
-										variant="secondary"
-										href={`/app/webhooks?page=${pagination.page - 1}`}
-									>
-										Previous
-									</s-button>
-								)}
-								{pagination.page < pagination.totalPages && (
-									<s-button
-										variant="secondary"
-										href={`/app/webhooks?page=${pagination.page + 1}`}
-									>
-										Next
-									</s-button>
-								)}
+							<s-stack direction="inline" gap="small">
+								<s-button
+									variant="secondary"
+									href={`/app/webhooks?page=${pagination.page - 1}`}
+									disabled={pagination.page <= 1}
+								>
+									Previous
+								</s-button>
+								<s-button
+									variant="secondary"
+									href={`/app/webhooks?page=${pagination.page + 1}`}
+									disabled={pagination.page >= pagination.totalPages}
+								>
+									Next
+								</s-button>
 							</s-stack>
 						</s-stack>
 					)}

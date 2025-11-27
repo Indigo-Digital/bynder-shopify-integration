@@ -33,11 +33,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const buffer = Buffer.from(await file.arrayBuffer());
 		const originalFilename = file.name;
 
-		// Construct path: folder/filename
-		// Ensure folder doesn't have leading/trailing slashes if it exists
-		const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, "");
-		const fullPath = cleanFolder
-			? `${cleanFolder}/${originalFilename}`
+		// Construct filename with prefix
+		// Shopify Files doesn't support folders, so we use prefix_filename format
+		const cleanPrefix = folder
+			.trim()
+			.replace(/^\/+|\/+$/g, "") // Remove leading/trailing slashes
+			.replace(/\//g, "_"); // Replace any remaining slashes with underscores
+		const fullPath = cleanPrefix
+			? `${cleanPrefix}_${originalFilename}`
 			: originalFilename;
 
 		// Upload to Shopify
@@ -350,13 +353,13 @@ export default function BulkUpload() {
 										fontSize: "14px",
 									}}
 								>
-									Folder Location (optional)
+									Filename Prefix (optional)
 								</div>
 								<input
 									type="text"
 									value={folder}
 									onChange={(e) => setFolder(e.target.value)}
-									placeholder="e.g. campaigns/summer"
+									placeholder="e.g. bf2025 or campaign_summer"
 									disabled={isUploading}
 									style={{
 										width: "100%",
@@ -376,7 +379,7 @@ export default function BulkUpload() {
 										color: "#6d7175",
 									}}
 								>
-									Prefix added to filenames
+									Added to start of filename (e.g., prefix_image.jpg)
 								</div>
 							</label>
 						</div>

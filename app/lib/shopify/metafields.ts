@@ -88,31 +88,22 @@ export async function setBynderMetafields(
 }
 
 /**
- * Set tags for a file in the $app:bynder namespace
+ * Set native Shopify tags on a file
+ * These tags appear in the Shopify Files UI and can be used for filtering
  */
 export async function setFileTags(
 	admin: AdminApi,
 	fileId: string,
 	tags: string[]
 ): Promise<void> {
-	const mutations = [
-		{
-			namespace: METAFIELD_NAMESPACE,
-			key: "tags",
-			type: "list.single_line_text_field",
-			value: JSON.stringify(tags),
-			ownerId: fileId,
-		},
-	];
+	if (tags.length === 0) return;
 
 	const response = await admin.graphql(
 		`#graphql
-      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-          metafields {
+      mutation tagsAdd($id: ID!, $tags: [String!]!) {
+        tagsAdd(id: $id, tags: $tags) {
+          node {
             id
-            namespace
-            key
           }
           userErrors {
             field
@@ -123,15 +114,16 @@ export async function setFileTags(
     `,
 		{
 			variables: {
-				metafields: mutations,
+				id: fileId,
+				tags: tags,
 			},
 		}
 	);
 
 	const data = await response.json();
-	if (data.data?.metafieldsSet?.userErrors?.length > 0) {
+	if (data.data?.tagsAdd?.userErrors?.length > 0) {
 		throw new Error(
-			`Failed to set file tags: ${JSON.stringify(data.data.metafieldsSet.userErrors)}`
+			`Failed to set file tags: ${JSON.stringify(data.data.tagsAdd.userErrors)}`
 		);
 	}
 }

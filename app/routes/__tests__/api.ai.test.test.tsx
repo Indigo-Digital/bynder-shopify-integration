@@ -48,4 +48,3 @@ describe("AI Alt Text Generation", () => {
 		expect(result.error).toBe("Invalid credentials");
 	});
 });
-

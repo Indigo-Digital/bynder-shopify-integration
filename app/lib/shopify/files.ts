@@ -499,7 +499,130 @@ export async function uploadBynderAsset(
 		console.log(`[Upload Debug] Parameter "${param.name}": ${valuePreview}`);
 	}
 
-	// Step 2: Upload file to staged upload URL
+	// Detect V4 signed URL format vs policy-based POST format
+	// V4 signed URLs have auth in query params (X-Goog-Algorithm, X-Goog-Signature, etc.)
+	// and minimal form params (just content_type, acl) - these expect PUT with raw bytes
+	// Policy-based URLs have auth in form params (policy, x-goog-signature, key, etc.) - these expect POST multipart
+	const isV4SignedUrl = urlObj.searchParams.has("X-Goog-Algorithm");
+	const hasMinimalParams = stagedTarget.parameters.length <= 3; // content_type, acl, maybe success_action_status
+
+	if (isV4SignedUrl && hasMinimalParams) {
+		console.error(
+			`[Upload Debug] Detected V4 signed URL format - using PUT with raw bytes`
+		);
+
+		// For V4 signed URLs, use PUT with raw file bytes
+		// The parameters (content_type, acl) should be ignored for PUT - they're only for POST policy uploads
+		// Set Content-Type header to the actual file content type
+		const MAX_RETRIES = 3;
+		let uploadResponse: {
+			status: number;
+			statusText: string;
+			data: unknown;
+		} | null = null;
+		let lastError: Error | null = null;
+
+		for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+			try {
+				if (attempt > 1) {
+					console.error(
+						`[Upload] Retry attempt ${attempt}/${MAX_RETRIES} for PUT upload`
+					);
+				}
+
+				console.error(
+					`[Upload Debug] Sending PUT request to: ${stagedTarget.url}`
+				);
+				console.error(`[Upload Debug] Content-Type: ${contentType}`);
+				console.error(`[Upload Debug] Body size: ${buffer.length} bytes`);
+
+				// Convert Buffer to Uint8Array for fetch API compatibility
+				const bodyArray = new Uint8Array(buffer);
+				const putResponse = await fetch(stagedTarget.url, {
+					method: "PUT",
+					body: bodyArray,
+					headers: {
+						"Content-Type": contentType,
+					},
+				});
+
+				const responseData = await putResponse.text();
+				console.error(
+					`[Upload Debug] PUT Response status: ${putResponse.status} ${putResponse.statusText}`
+				);
+				if (responseData) {
+					const responsePreview =
+						responseData.length > 500
+							? `${responseData.substring(0, 500)}...`
+							: responseData;
+					console.error(`[Upload Debug] PUT Response body: ${responsePreview}`);
+				}
+
+				uploadResponse = {
+					status: putResponse.status,
+					statusText: putResponse.statusText,
+					data: responseData,
+				};
+
+				if (putResponse.ok) {
+					console.error(
+						`[Upload Debug] PUT upload successful: HTTP ${putResponse.status}`
+					);
+					break;
+				}
+
+				// If not successful, check if we should retry
+				if (attempt < MAX_RETRIES) {
+					const waitTime = attempt * 1000;
+					console.error(
+						`[Upload] PUT failed (attempt ${attempt}/${MAX_RETRIES}): HTTP ${putResponse.status}. Retrying in ${waitTime}ms...`
+					);
+					await new Promise((resolve) => setTimeout(resolve, waitTime));
+					continue;
+				}
+			} catch (error) {
+				lastError = error instanceof Error ? error : new Error(String(error));
+				if (attempt < MAX_RETRIES) {
+					const waitTime = attempt * 1000;
+					console.error(
+						`[Upload] PUT error (attempt ${attempt}/${MAX_RETRIES}): ${lastError.message}. Retrying in ${waitTime}ms...`
+					);
+					await new Promise((resolve) => setTimeout(resolve, waitTime));
+					continue;
+				}
+				throw new Error(
+					`PUT upload failed after ${MAX_RETRIES} attempts: ${lastError.message}`
+				);
+			}
+		}
+
+		if (!uploadResponse) {
+			throw new Error(
+				`PUT upload failed after ${MAX_RETRIES} attempts: ${lastError?.message || "Unknown error"}`
+			);
+		}
+
+		if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
+			const errorDetails =
+				typeof uploadResponse.data === "string"
+					? uploadResponse.data.substring(0, 1000)
+					: String(uploadResponse.data).substring(0, 1000);
+			throw new Error(
+				`Failed to PUT file to staged URL: HTTP ${uploadResponse.status}: ${uploadResponse.statusText} - ${errorDetails}`
+			);
+		}
+
+		// Continue to Step 3: Create file in Shopify
+		// (The code after the multipart upload block handles this)
+	} else {
+		console.error(
+			`[Upload Debug] Using policy-based POST multipart format (isV4=${isV4SignedUrl}, params=${stagedTarget.parameters.length})`
+		);
+	}
+
+	// Step 2: Upload file to staged upload URL (POST multipart - for policy-based uploads)
+	// Skip this if we already uploaded via PUT above
+	if (!(isV4SignedUrl && hasMinimalParams)) {
 	// For Shopify staged uploads (typically S3), we need to:
 	// 1. Add all parameters first (in order)
 	// 2. Add the file last
@@ -1143,6 +1266,7 @@ export async function uploadBynderAsset(
 			`Failed to upload file to staged URL: HTTP ${statusCode}: ${statusText} - ${errorDetails}`
 		);
 	}
+	} // End of POST multipart upload block
 
 	// Step 3: Create file in Shopify using the resourceUrl
 	// Track Shopify API call

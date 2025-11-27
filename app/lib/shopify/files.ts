@@ -104,10 +104,7 @@ function detectMimeTypeFromBuffer(buffer: Buffer): string | null {
 /**
  * Fix wildcard MIME types (like "image/*") by detecting actual type from buffer
  */
-function fixWildcardMimeType(
-	contentType: string,
-	buffer: Buffer
-): string {
+function fixWildcardMimeType(contentType: string, buffer: Buffer): string {
 	// Check if this is a wildcard MIME type
 	if (contentType.includes("/*")) {
 		const detectedType = detectMimeTypeFromBuffer(buffer);

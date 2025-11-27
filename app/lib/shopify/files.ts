@@ -1316,6 +1316,10 @@ export async function uploadBynderAsset(
 
 	const fileCreateData = await fileCreateResponse.json();
 
+	console.log(
+		`[Upload] fileCreate response: ${JSON.stringify(fileCreateData, null, 2).substring(0, 500)}`
+	);
+
 	if (fileCreateData.data?.fileCreate?.userErrors?.length > 0) {
 		throw new Error(
 			`Failed to upload file: ${JSON.stringify(fileCreateData.data.fileCreate.userErrors)}`
@@ -1324,11 +1328,19 @@ export async function uploadBynderAsset(
 
 	const file = fileCreateData.data?.fileCreate?.files?.[0];
 	if (!file) {
+		console.error(
+			`[Upload] No file in fileCreate response. Full response: ${JSON.stringify(fileCreateData)}`
+		);
 		throw new Error("No file returned from Shopify");
 	}
 
 	const fileId = file.id;
 	const fileUrl = file.image?.url || file.url || "";
+	const fileStatus = file.fileStatus || "UNKNOWN";
+
+	console.log(
+		`[Upload] File created successfully: id=${fileId}, status=${fileStatus}, url=${fileUrl || "(not yet available)"}`
+	);
 
 	// Set metafields
 	// For permalink, we want the portal URL (without /api)

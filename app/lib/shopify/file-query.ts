@@ -25,6 +25,10 @@ export async function getShopifyFileDetails(
 		return new Map();
 	}
 
+	console.log(
+		`[FileQuery] Fetching details for ${fileIds.length} files: ${fileIds.slice(0, 3).join(", ")}${fileIds.length > 3 ? "..." : ""}`
+	);
+
 	// Shopify's nodes query supports up to 250 IDs per request
 	// We'll batch them if needed
 	const BATCH_SIZE = 250;
@@ -81,11 +85,22 @@ export async function getShopifyFileDetails(
 		const data = await response.json();
 
 		if (data.errors) {
-			console.error("GraphQL errors fetching files:", data.errors);
+			console.error("[FileQuery] GraphQL errors fetching files:", data.errors);
 			// Continue with partial results rather than failing completely
 		}
 
 		const nodes = data.data?.nodes || [];
+		console.log(
+			`[FileQuery] Received ${nodes.length} nodes for batch of ${batch.length} IDs`
+		);
+
+		// Log how many nodes are null (file not found)
+		const nullNodes = nodes.filter((n: unknown) => n === null).length;
+		if (nullNodes > 0) {
+			console.warn(
+				`[FileQuery] ${nullNodes} files not found in Shopify (IDs may be invalid or files may have been deleted)`
+			);
+		}
 
 		for (const node of nodes) {
 			if (!node || !node.id) {

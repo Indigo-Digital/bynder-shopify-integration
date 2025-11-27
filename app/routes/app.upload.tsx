@@ -8,14 +8,24 @@ import {
 	data,
 	type LoaderFunctionArgs,
 	useFetcher,
+	useLoaderData,
 } from "react-router";
+import prisma from "../db.server.js";
+import { generateAltText } from "../lib/ai/gemini-vision.js";
 import { uploadBufferToShopify } from "../lib/shopify/files.js";
 import { setFileTags } from "../lib/shopify/metafields.js";
 import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-	await authenticate.admin(request);
-	return null;
+	const { session } = await authenticate.admin(request);
+	const shop = session.shop;
+
+	const shopConfig = await prisma.shop.findUnique({
+		where: { shop },
+		select: { enableAutoAltText: true },
+	});
+
+	return { aiAltTextAvailable: shopConfig?.enableAutoAltText || false };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -25,6 +35,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 	const file = formData.get("file") as File;
 	const folder = (formData.get("folder") as string) || "";
 	const tags = (formData.get("tags") as string) || "";
+	const useAiAltText = formData.get("useAiAltText") === "true";
 
 	if (!file) {
 		return data({ error: "No file provided" }, { status: 400 });
@@ -42,6 +53,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			? `${cleanPrefix}_${originalFilename}`
 			: originalFilename;
 
+		// Generate AI alt text if requested
+		let altText: string | undefined;
+		if (useAiAltText && file.type.startsWith("image/")) {
+			try {
+				const generated = await generateAltText(
+					buffer,
+					file.type,
+					originalFilename
+				);
+				if (generated) {
+					altText = generated;
+				}
+			} catch (error) {
+				console.warn("AI alt text generation failed:", error);
+				// Continue with upload even if AI generation fails
+			}
+		}
+
 		const { fileId, fileUrl } = await uploadBufferToShopify(
 			admin,
 			buffer,
@@ -49,7 +78,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			fullPath,
 			originalFilename,
 			session.shop,
-			undefined
+			undefined,
+			altText
 		);
 
 		if (tags) {
@@ -81,10 +111,12 @@ interface UploadFile {
 }
 
 export default function BulkUpload() {
+	const { aiAltTextAvailable } = useLoaderData<typeof loader>();
 	const [files, setFiles] = useState<UploadFile[]>([]);
 	const [folder, setFolder] = useState("");
 	const [tags, setTags] = useState<string[]>([]);
 	const [tagInput, setTagInput] = useState("");
+	const [useAiAltText, setUseAiAltText] = useState(false);
 	const [isUploading, setIsUploading] = useState(false);
 	const currentUploadIdRef = useRef<string | null>(null);
 	const fetcher = useFetcher<{
@@ -250,12 +282,13 @@ export default function BulkUpload() {
 		formData.append("file", fileObj.file);
 		formData.append("folder", folder);
 		formData.append("tags", tags.join(","));
+		formData.append("useAiAltText", String(useAiAltText));
 
 		fetcher.submit(formData, {
 			method: "POST",
 			encType: "multipart/form-data",
 		});
-	}, [files, folder, tags, fetcher]);
+	}, [files, folder, tags, useAiAltText, fetcher]);
 
 	useEffect(() => {
 		if (
@@ -319,70 +352,88 @@ export default function BulkUpload() {
 
 					{/* Settings Section */}
 					<s-box padding="base" background="subdued" borderRadius="base">
-						<s-grid gridTemplateColumns="1fr 1fr" gap="base">
-							<s-stack direction="block" gap="small">
-								<s-text-field
-									label="Filename Prefix (optional)"
-									value={folder}
-									onChange={(e) =>
-										setFolder((e.target as HTMLInputElement).value)
-									}
-									placeholder="e.g. bf2025 or campaign_summer"
-									disabled={isUploading}
-								/>
-								<s-text color="subdued">
-									Added to start of filename (e.g., prefix_image.jpg)
-								</s-text>
-							</s-stack>
+						<s-stack direction="block" gap="base">
+							<s-grid gridTemplateColumns="1fr 1fr" gap="base">
+								<s-stack direction="block" gap="small">
+									<s-text-field
+										label="Filename Prefix (optional)"
+										value={folder}
+										onChange={(e) =>
+											setFolder((e.target as HTMLInputElement).value)
+										}
+										placeholder="e.g. bf2025 or campaign_summer"
+										disabled={isUploading}
+									/>
+									<s-text color="subdued">
+										Added to start of filename (e.g., prefix_image.jpg)
+									</s-text>
+								</s-stack>
 
-							<s-stack direction="block" gap="small">
-								<s-text>
-									<strong>Tags (optional)</strong>
-								</s-text>
-								<s-box
-									padding="small"
-									background={isUploading ? "subdued" : "transparent"}
-									borderWidth="base"
-									borderRadius="base"
-								>
-									<s-stack direction="inline" gap="small" alignItems="center">
-										{tags.map((tag) => (
-											<s-clickable-chip
-												key={tag}
-												onClick={() => removeTag(tag)}
+								<s-stack direction="block" gap="small">
+									<s-text>
+										<strong>Tags (optional)</strong>
+									</s-text>
+									<s-box
+										padding="small"
+										background={isUploading ? "subdued" : "transparent"}
+										borderWidth="base"
+										borderRadius="base"
+									>
+										<s-stack direction="inline" gap="small" alignItems="center">
+											{tags.map((tag) => (
+												<s-clickable-chip
+													key={tag}
+													onClick={() => removeTag(tag)}
+													disabled={isUploading}
+												>
+													{tag} ×
+												</s-clickable-chip>
+											))}
+											<input
+												type="text"
+												value={tagInput}
+												onChange={handleTagInputChange}
+												onKeyDown={handleTagKeyDown}
+												onBlur={() => tagInput && addTag(tagInput)}
+												placeholder={
+													tags.length === 0 ? "Type and press Enter" : ""
+												}
 												disabled={isUploading}
-											>
-												{tag} ×
-											</s-clickable-chip>
-										))}
-										<input
-											type="text"
-											value={tagInput}
-											onChange={handleTagInputChange}
-											onKeyDown={handleTagKeyDown}
-											onBlur={() => tagInput && addTag(tagInput)}
-											placeholder={
-												tags.length === 0 ? "Type and press Enter" : ""
-											}
-											disabled={isUploading}
-											style={{
-												flex: 1,
-												minWidth: "100px",
-												border: "none",
-												outline: "none",
-												fontSize: "14px",
-												lineHeight: "20px",
-												padding: "4px",
-												backgroundColor: "transparent",
-											}}
-										/>
-									</s-stack>
-								</s-box>
-								<s-text color="subdued">
-									Press Enter or comma to add tags
-								</s-text>
-							</s-stack>
-						</s-grid>
+												style={{
+													flex: 1,
+													minWidth: "100px",
+													border: "none",
+													outline: "none",
+													fontSize: "14px",
+													lineHeight: "20px",
+													padding: "4px",
+													backgroundColor: "transparent",
+												}}
+											/>
+										</s-stack>
+									</s-box>
+									<s-text color="subdued">
+										Press Enter or comma to add tags
+									</s-text>
+								</s-stack>
+							</s-grid>
+
+							{/* AI Alt Text Option */}
+							{aiAltTextAvailable && (
+								<s-stack direction="block" gap="small">
+									<s-checkbox
+										label="Generate AI-powered alt text for images"
+										checked={useAiAltText}
+										onChange={() => setUseAiAltText(!useAiAltText)}
+										disabled={isUploading}
+									/>
+									<s-text color="subdued">
+										Uses Google Gemini AI to automatically generate descriptive
+										alt text for accessibility. Only applies to image files.
+									</s-text>
+								</s-stack>
+							)}
+						</s-stack>
 					</s-box>
 
 					{/* Dropzone - using react-dropzone with Polaris-like styling */}

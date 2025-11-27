@@ -5,6 +5,9 @@
 import prisma from "../../db.server.js";
 import type { MetricMetadata, MetricName, MetricRecord } from "./types.js";
 
+// Flag to track if we've logged the missing model warning (log once per session)
+let hasLoggedSyncMetricsWarning = false;
+
 /**
  * Check if metrics collection is enabled
  */
@@ -33,10 +36,27 @@ export async function recordMetric(record: MetricRecord): Promise<void> {
 		});
 	} catch (error) {
 		// Don't throw - metrics collection should not break the main flow
-		console.warn(
-			`[Metrics] Failed to record metric ${record.metricName}:`,
-			error instanceof Error ? error.message : String(error)
-		);
+		// Only log once per session to avoid spam
+		if (!hasLoggedSyncMetricsWarning) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			// Check for common "model doesn't exist" scenarios
+			if (
+				errorMessage.includes("does not exist") ||
+				errorMessage.includes("undefined") ||
+				errorMessage.includes("no such table")
+			) {
+				console.log(
+					"[Metrics] syncMetrics table not available - metrics collection disabled"
+				);
+				hasLoggedSyncMetricsWarning = true;
+			} else {
+				console.warn(
+					`[Metrics] Failed to record metric ${record.metricName}:`,
+					errorMessage
+				);
+			}
+		}
 	}
 }
 
@@ -138,25 +158,30 @@ export async function recordRateLimitHit(
  * Clean up old metrics (based on retention days)
  */
 export async function cleanupOldMetrics(shopId?: string): Promise<number> {
-	const retentionDays = parseInt(
+	const retentionDays = Number.parseInt(
 		process.env.METRICS_RETENTION_DAYS || "30",
 		10
 	);
 	const cutoffDate = new Date();
 	cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
-	const where = shopId
-		? {
-				shopId,
-				recordedAt: { lt: cutoffDate },
-			}
-		: {
-				recordedAt: { lt: cutoffDate },
-			};
+	try {
+		const where = shopId
+			? {
+					shopId,
+					recordedAt: { lt: cutoffDate },
+				}
+			: {
+					recordedAt: { lt: cutoffDate },
+				};
 
-	const result = await prisma.syncMetrics.deleteMany({
-		where,
-	});
+		const result = await prisma.syncMetrics.deleteMany({
+			where,
+		});
 
-	return result.count;
+		return result.count;
+	} catch {
+		// Silently fail - metrics cleanup is not critical
+		return 0;
+	}
 }

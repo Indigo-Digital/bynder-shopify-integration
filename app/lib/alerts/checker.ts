@@ -21,7 +21,7 @@ export interface AlertCheckResult {
  * Check for alerts based on sync job results
  */
 export async function checkSyncJobAlerts(
-	shopId: string,
+	_shopId: string,
 	syncJobId: string,
 	conditions?: AlertConditions
 ): Promise<AlertCheckResult[]> {
@@ -77,25 +77,12 @@ export async function checkSyncJobAlerts(
 	}
 
 	// Get metrics for this job
-	let metrics: Array<{
+	// Note: syncMetrics model is not yet implemented in the schema
+	// This feature will be available in a future release
+	const metrics: Array<{
 		metricName: string;
 		value: number;
 	}> = [];
-	try {
-		if (!prisma.syncMetrics) {
-			console.error("prisma.syncMetrics is undefined in checkSyncJobAlerts");
-			return alerts;
-		}
-		metrics = await prisma.syncMetrics.findMany({
-			where: {
-				shopId,
-				syncJobId,
-			},
-		});
-	} catch (error) {
-		console.error("Error fetching metrics in checkSyncJobAlerts:", error);
-		return alerts;
-	}
 
 	const errorRateMetric = metrics.find(
 		(m: { metricName: string }) => m.metricName === "error_rate_percent"

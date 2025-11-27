@@ -1,14 +1,14 @@
+import JSZip from "jszip";
+import { useCallback, useState } from "react";
+import { useDropzone } from "react-dropzone";
 import {
 	type ActionFunctionArgs,
-	type LoaderFunctionArgs,
 	data,
+	type LoaderFunctionArgs,
 } from "react-router";
-import { useState, useCallback } from "react";
-import { useDropzone } from "react-dropzone";
-import JSZip from "jszip";
-import { authenticate } from "../shopify.server";
 import { uploadBufferToShopify } from "../lib/shopify/files";
 import { setFileTags } from "../lib/shopify/metafields";
+import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
 	await authenticate.admin(request);
@@ -30,11 +30,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 	try {
 		const buffer = Buffer.from(await file.arrayBuffer());
 		const originalFilename = file.name;
-		
+
 		// Construct path: folder/filename
 		// Ensure folder doesn't have leading/trailing slashes if it exists
 		const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, "");
-		const fullPath = cleanFolder 
+		const fullPath = cleanFolder
 			? `${cleanFolder}/${originalFilename}`
 			: originalFilename;
 
@@ -46,12 +46,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			fullPath,
 			originalFilename,
 			session.shop,
-			undefined // no syncJobId
+			undefined, // no syncJobId
 		);
 
 		// Set tags if present
 		if (tags) {
-			const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
+			const tagList = tags
+				.split(",")
+				.map((t) => t.trim())
+				.filter(Boolean);
 			if (tagList.length > 0) {
 				await setFileTags(admin, fileId, tagList);
 			}
@@ -62,7 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		console.error("Upload error:", error);
 		return data(
 			{ error: error instanceof Error ? error.message : "Upload failed" },
-			{ status: 500 }
+			{ status: 500 },
 		);
 	}
 };
@@ -87,26 +90,30 @@ export default function BulkUpload() {
 			if (file.name.endsWith(".zip")) {
 				try {
 					const zip = await JSZip.loadAsync(file);
-					
+
 					// Iterate through zip contents
 					const promises: Promise<void>[] = [];
-					zip.forEach((relativePath, zipEntry) => {
+					zip.forEach((_relativePath, zipEntry) => {
 						if (!zipEntry.dir) {
 							promises.push(
 								(async () => {
 									// Get file content as blob/file
 									const content = await zipEntry.async("blob");
 									// Create a File object
-									const extractedFile = new File([content], zipEntry.name.split('/').pop() || zipEntry.name, {
-										type: "application/octet-stream" // We might try to detect type, but Shopify handles it mostly
-									});
-									
+									const extractedFile = new File(
+										[content],
+										zipEntry.name.split("/").pop() || zipEntry.name,
+										{
+											type: "application/octet-stream", // We might try to detect type, but Shopify handles it mostly
+										},
+									);
+
 									newFiles.push({
 										id: Math.random().toString(36).substring(7),
 										file: extractedFile,
 										status: "pending",
 									});
-								})()
+								})(),
 							);
 						}
 					});
@@ -130,20 +137,24 @@ export default function BulkUpload() {
 	const { getRootProps, getInputProps, isDragActive } = useDropzone({
 		onDrop,
 		accept: {
-			'image/*': [],
-			'application/zip': ['.zip'],
-			'application/x-zip-compressed': ['.zip']
-		}
+			"image/*": [],
+			"application/zip": [".zip"],
+			"application/x-zip-compressed": [".zip"],
+		},
 	});
 
 	const handleUpload = async () => {
 		setIsUploading(true);
-		
-		const pendingFiles = files.filter(f => f.status === "pending");
-		
+
+		const pendingFiles = files.filter((f) => f.status === "pending");
+
 		for (const fileObj of pendingFiles) {
 			// Update status to uploading
-			setFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, status: "uploading" } : f));
+			setFiles((prev) =>
+				prev.map((f) =>
+					f.id === fileObj.id ? { ...f, status: "uploading" } : f,
+				),
+			);
 
 			const formData = new FormData();
 			formData.append("file", fileObj.file);
@@ -155,7 +166,7 @@ export default function BulkUpload() {
 					method: "POST",
 					body: formData,
 				});
-				
+
 				const result = await response.json();
 
 				if (!response.ok || result.error) {
@@ -163,14 +174,25 @@ export default function BulkUpload() {
 				}
 
 				// Update status to success
-				setFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, status: "success" } : f));
+				setFiles((prev) =>
+					prev.map((f) =>
+						f.id === fileObj.id ? { ...f, status: "success" } : f,
+					),
+				);
 			} catch (error) {
 				// Update status to error
-				setFiles(prev => prev.map(f => f.id === fileObj.id ? { 
-					...f, 
-					status: "error", 
-					error: error instanceof Error ? error.message : "Unknown error" 
-				} : f));
+				setFiles((prev) =>
+					prev.map((f) =>
+						f.id === fileObj.id
+							? {
+									...f,
+									status: "error",
+									error:
+										error instanceof Error ? error.message : "Unknown error",
+								}
+							: f,
+					),
+				);
 			}
 		}
 
@@ -178,11 +200,11 @@ export default function BulkUpload() {
 	};
 
 	const removeFile = (id: string) => {
-		setFiles(prev => prev.filter(f => f.id !== id));
+		setFiles((prev) => prev.filter((f) => f.id !== id));
 	};
 
 	const clearCompleted = () => {
-		setFiles(prev => prev.filter(f => f.status !== "success"));
+		setFiles((prev) => prev.filter((f) => f.status !== "success"));
 	};
 
 	return (
@@ -191,19 +213,24 @@ export default function BulkUpload() {
 				<s-stack direction="block" gap="base">
 					<s-banner>
 						<p>
-							Upload images directly to Shopify Files. You can drop individual images or ZIP archives containing images.
-							Optionally specify a folder path and tags to assign to all uploaded files.
+							Upload images directly to Shopify Files. You can drop individual
+							images or ZIP archives containing images. Optionally specify a
+							folder path and tags to assign to all uploaded files.
 						</p>
 					</s-banner>
 
-					<div style={{ 
-						display: "grid", 
-						gridTemplateColumns: "1fr 1fr", 
-						gap: "1rem",
-						marginBottom: "1rem"
-					}}>
+					<div
+						style={{
+							display: "grid",
+							gridTemplateColumns: "1fr 1fr",
+							gap: "1rem",
+							marginBottom: "1rem",
+						}}
+					>
 						<label style={{ display: "block" }}>
-							<div style={{ marginBottom: "0.5rem", fontWeight: "bold" }}>Folder Location (optional)</div>
+							<div style={{ marginBottom: "0.5rem", fontWeight: "bold" }}>
+								Folder Location (optional)
+							</div>
 							<input
 								type="text"
 								value={folder}
@@ -213,17 +240,21 @@ export default function BulkUpload() {
 									width: "100%",
 									padding: "0.5rem",
 									border: "1px solid #ccc",
-									borderRadius: "4px"
+									borderRadius: "4px",
 								}}
 								disabled={isUploading}
 							/>
-							<div style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}>
+							<div
+								style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}
+							>
 								Prefix added to filenames
 							</div>
 						</label>
 
 						<label style={{ display: "block" }}>
-							<div style={{ marginBottom: "0.5rem", fontWeight: "bold" }}>Tags (optional)</div>
+							<div style={{ marginBottom: "0.5rem", fontWeight: "bold" }}>
+								Tags (optional)
+							</div>
 							<input
 								type="text"
 								value={tags}
@@ -233,11 +264,13 @@ export default function BulkUpload() {
 									width: "100%",
 									padding: "0.5rem",
 									border: "1px solid #ccc",
-									borderRadius: "4px"
+									borderRadius: "4px",
 								}}
 								disabled={isUploading}
 							/>
-							<div style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}>
+							<div
+								style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}
+							>
 								Comma-separated list
 							</div>
 						</label>
@@ -252,7 +285,7 @@ export default function BulkUpload() {
 							textAlign: "center",
 							cursor: isUploading ? "not-allowed" : "pointer",
 							backgroundColor: isDragActive ? "#f0f0f0" : "transparent",
-							marginBottom: "1rem"
+							marginBottom: "1rem",
 						}}
 					>
 						<input {...getInputProps()} disabled={isUploading} />
@@ -265,23 +298,32 @@ export default function BulkUpload() {
 
 					{files.length > 0 && (
 						<div style={{ marginBottom: "1rem" }}>
-							<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+							<div
+								style={{
+									display: "flex",
+									justifyContent: "space-between",
+									alignItems: "center",
+									marginBottom: "0.5rem",
+								}}
+							>
 								<h3 style={{ fontWeight: "bold" }}>Files ({files.length})</h3>
 								<div style={{ display: "flex", gap: "0.5rem" }}>
-									<button 
+									<button
+										type="button"
 										onClick={clearCompleted}
-										disabled={isUploading || !files.some(f => f.status === "success")}
+										disabled={isUploading || !files.some((f) => f.status === "success")}
 										style={{
 											background: "none",
 											border: "none",
 											color: "#0070f3",
 											cursor: "pointer",
-											textDecoration: "underline"
+											textDecoration: "underline",
 										}}
 									>
 										Clear Completed
 									</button>
-									<button 
+									<button
+										type="button"
 										onClick={() => setFiles([])}
 										disabled={isUploading}
 										style={{
@@ -289,7 +331,7 @@ export default function BulkUpload() {
 											border: "none",
 											color: "#d00",
 											cursor: "pointer",
-											textDecoration: "underline"
+											textDecoration: "underline",
 										}}
 									>
 										Clear All
@@ -297,36 +339,57 @@ export default function BulkUpload() {
 								</div>
 							</div>
 
-							<div style={{ 
-								border: "1px solid #eee", 
-								borderRadius: "4px", 
-								maxHeight: "300px", 
-								overflowY: "auto" 
-							}}>
+							<div
+								style={{
+									border: "1px solid #eee",
+									borderRadius: "4px",
+									maxHeight: "300px",
+									overflowY: "auto",
+								}}
+							>
 								{files.map((f) => (
-									<div key={f.id} style={{ 
-										padding: "0.5rem", 
-										borderBottom: "1px solid #eee",
-										display: "flex",
-										justifyContent: "space-between",
-										alignItems: "center",
-										backgroundColor: f.status === "success" ? "#f0fff4" : f.status === "error" ? "#fff5f5" : "transparent"
-									}}>
-										<div style={{ display: "flex", alignItems: "center", gap: "0.5rem", overflow: "hidden" }}>
-											<span style={{ 
-												fontSize: "0.8rem", 
-												padding: "0.1rem 0.3rem", 
-												borderRadius: "3px",
-												backgroundColor: "#eee"
-											}}>
+									<div
+										key={f.id}
+										style={{
+											padding: "0.5rem",
+											borderBottom: "1px solid #eee",
+											display: "flex",
+											justifyContent: "space-between",
+											alignItems: "center",
+											backgroundColor:
+												f.status === "success"
+													? "#f0fff4"
+													: f.status === "error"
+														? "#fff5f5"
+														: "transparent",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "0.5rem",
+												overflow: "hidden",
+											}}
+										>
+											<span
+												style={{
+													fontSize: "0.8rem",
+													padding: "0.1rem 0.3rem",
+													borderRadius: "3px",
+													backgroundColor: "#eee",
+												}}
+											>
 												{f.status.toUpperCase()}
 											</span>
-											<span style={{ 
-												whiteSpace: "nowrap", 
-												overflow: "hidden", 
-												textOverflow: "ellipsis",
-												maxWidth: "300px"
-											}}>
+											<span
+												style={{
+													whiteSpace: "nowrap",
+													overflow: "hidden",
+													textOverflow: "ellipsis",
+													maxWidth: "300px",
+												}}
+											>
 												{f.file.name}
 											</span>
 											<span style={{ fontSize: "0.8rem", color: "#999" }}>
@@ -335,11 +398,19 @@ export default function BulkUpload() {
 										</div>
 										<div>
 											{f.status === "error" && (
-												<span style={{ color: "#d00", fontSize: "0.8rem", marginRight: "0.5rem" }} title={f.error}>
+												<span
+													style={{
+														color: "#d00",
+														fontSize: "0.8rem",
+														marginRight: "0.5rem",
+													}}
+													title={f.error}
+												>
 													Error: {f.error}
 												</span>
 											)}
-											<button 
+											<button
+												type="button"
 												onClick={() => removeFile(f.id)}
 												disabled={isUploading}
 												style={{
@@ -348,7 +419,7 @@ export default function BulkUpload() {
 													cursor: "pointer",
 													fontSize: "1.2rem",
 													lineHeight: 1,
-													color: "#999"
+													color: "#999",
 												}}
 											>
 												&times;
@@ -361,12 +432,16 @@ export default function BulkUpload() {
 					)}
 
 					<s-stack direction="inline">
-						<s-button 
-							variant="primary" 
+						<s-button
+							variant="primary"
 							onClick={handleUpload}
-							disabled={isUploading || files.filter(f => f.status === "pending").length === 0}
+							disabled={
+								isUploading || files.filter((f) => f.status === "pending").length === 0
+							}
 						>
-							{isUploading ? "Uploading..." : `Upload ${files.filter(f => f.status === "pending").length} Files`}
+							{isUploading
+								? "Uploading..."
+								: `Upload ${files.filter((f) => f.status === "pending").length} Files`}
 						</s-button>
 					</s-stack>
 				</s-stack>
@@ -374,4 +449,3 @@ export default function BulkUpload() {
 		</s-page>
 	);
 }
-

@@ -3,6 +3,7 @@ import { env } from "../env.server.js";
 import { recordApiCall, recordRateLimitHit } from "../metrics/collector.js";
 import { getRateLimiter } from "./rate-limiter.js";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
+import { getApprovedPortalHost, normalizePortalApiUrl } from "./url-policy.js";
 
 export interface BynderPermanentTokenConfig {
 	baseURL: string;
@@ -15,7 +16,12 @@ export class BynderClient {
 	private bynder: Bynder;
 	public config: BynderConfig | BynderPermanentTokenConfig;
 
+	/**
+	 * @throws {UnapprovedBynderUrlError} When baseURL is not an approved Bynder
+	 * portal. The SDK attaches credentials to every request sent to baseURL.
+	 */
 	constructor(config: BynderConfig | BynderPermanentTokenConfig) {
+		getApprovedPortalHost(config.baseURL);
 		this.config = config;
 		const bynderConfig: {
 			baseURL: string;
@@ -53,9 +59,13 @@ export class BynderClient {
 	/**
 	 * Create client using permanent token from environment variables
 	 * Requires baseURL (typically from shop config) and uses env vars for token/credentials
-	 * Automatically appends /api to the baseURL if not present
+	 * Normalizes the baseURL to https://<approved portal host>/api
+	 *
+	 * @throws {UnapprovedBynderUrlError} When baseURL is not an approved portal
 	 */
 	static createFromEnv(baseURL: string): BynderClient {
+		const normalizedBaseURL = normalizePortalApiUrl(baseURL);
+
 		if (!env.BYNDER_PERMANENT_TOKEN) {
 			throw new Error(
 				"BYNDER_PERMANENT_TOKEN environment variable is required"
@@ -65,15 +75,6 @@ export class BynderClient {
 			throw new Error(
 				"BYNDER_CLIENT_ID and BYNDER_CLIENT_SECRET environment variables are required"
 			);
-		}
-
-		// Normalize baseURL: ensure it ends with /api
-		let normalizedBaseURL = baseURL.trim();
-		// Remove trailing slash
-		normalizedBaseURL = normalizedBaseURL.replace(/\/$/, "");
-		// Append /api if not present
-		if (!normalizedBaseURL.endsWith("/api")) {
-			normalizedBaseURL = `${normalizedBaseURL}/api`;
 		}
 
 		return BynderClient.createPermanentTokenClient({

@@ -106,7 +106,8 @@ function createMockBynderClient(_testImagePath: string): BynderClient {
 		},
 		getMediaDownloadUrl: async () => {
 			// Return a special URL that our fetch mock will intercept
-			downloadUrl = "http://mock-bynder-download/test-image.png";
+			downloadUrl =
+				"https://bynder-mock-download.s3.amazonaws.com/test-image.png";
 			return downloadUrl;
 		},
 		config: {

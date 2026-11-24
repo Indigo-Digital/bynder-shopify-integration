@@ -13,10 +13,12 @@ export const loader = async (_args: LoaderFunctionArgs) => {
 			timestamp: new Date().toISOString(),
 		});
 	} catch (error) {
+		// This route is public; database errors can carry connection details,
+		// so they are only written to server logs.
+		console.error("Health check database probe failed:", error);
 		return Response.json(
 			{
 				status: "unhealthy",
-				error: error instanceof Error ? error.message : "Unknown error",
 				timestamp: new Date().toISOString(),
 			},
 			{ status: 503 }

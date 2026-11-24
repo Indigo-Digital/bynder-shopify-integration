@@ -1,7 +1,11 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
-import { retryFailedAssets } from "../lib/sync/retry-failed-assets.js";
+import {
+	retryFailedAssets,
+	SyncJobAccessError,
+	SyncJobNotFoundError,
+} from "../lib/sync/retry-failed-assets.js";
 import { authenticate } from "../shopify.server.js";
 
 /**
@@ -103,7 +107,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			retryOptions.assetIds = body.assetIds;
 		}
 
-		const result = await retryFailedAssets(retryOptions);
+		let result: Awaited<ReturnType<typeof retryFailedAssets>>;
+		try {
+			result = await retryFailedAssets(retryOptions);
+		} catch (error) {
+			if (error instanceof SyncJobAccessError) {
+				return Response.json({ error: error.message }, { status: 403 });
+			}
+			if (error instanceof SyncJobNotFoundError) {
+				return Response.json({ error: error.message }, { status: 404 });
+			}
+			throw error;
+		}
 
 		return Response.json({
 			success: true,

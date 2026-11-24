@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import axios from "axios";
 import type { BynderClient } from "./client.js";
+import { normalizePortalApiUrl } from "./url-policy.js";
 
 export interface WebhookSubscription {
 	id: string;
@@ -16,22 +17,29 @@ export interface CreateWebhookResponse {
 	active: boolean;
 }
 
+const SUBSCRIPTIONS_PATH = "/v7/webhooks/public/api/subscriptions";
+
+interface WebhookRequestContext {
+	subscriptionsUrl: string;
+	requestConfig: {
+		headers: Record<string, string>;
+		maxRedirects: number;
+	};
+}
+
 /**
- * Create a webhook subscription in Bynder
- * POST /api/v7/webhooks/public/api/subscriptions
+ * Builds the endpoint and auth headers for Bynder webhook API calls.
+ * The permanent token is only attached when the client's baseURL is an
+ * approved Bynder portal, and redirects are not followed so the token and
+ * request never reach another host.
+ *
+ * @throws {UnapprovedBynderUrlError} When baseURL is not an approved portal
  */
-export async function createWebhookSubscription(
-	bynderClient: BynderClient,
-	url: string,
-	events: string[] = ["asset.tagged", "media.tagged"]
-): Promise<CreateWebhookResponse> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
+function getWebhookRequestContext(
+	bynderClient: BynderClient
+): WebhookRequestContext {
+	const apiBaseUrl = normalizePortalApiUrl(bynderClient.config.baseURL);
 
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions`;
-
-	// Get permanent token for authentication
 	const permanentToken =
 		"permanentToken" in bynderClient.config
 			? bynderClient.config.permanentToken
@@ -41,20 +49,40 @@ export async function createWebhookSubscription(
 		throw new Error("Permanent token is required for webhook operations");
 	}
 
-	const response = await axios.post(
-		endpoint,
-		{
-			url,
-			events,
+	return {
+		subscriptionsUrl: `${apiBaseUrl}${SUBSCRIPTIONS_PATH}`,
+		requestConfig: {
+			headers: { Authorization: `Bearer ${permanentToken}` },
+			maxRedirects: 0,
 		},
+	};
+}
+
+function subscriptionUrl(context: WebhookRequestContext, id: string): string {
+	return `${context.subscriptionsUrl}/${encodeURIComponent(id)}`;
+}
+
+/**
+ * Create a webhook subscription in Bynder
+ * POST /api/v7/webhooks/public/api/subscriptions
+ */
+export async function createWebhookSubscription(
+	bynderClient: BynderClient,
+	url: string,
+	events: string[] = ["asset.tagged", "media.tagged"]
+): Promise<CreateWebhookResponse> {
+	const context = getWebhookRequestContext(bynderClient);
+	const response = await axios.post(
+		context.subscriptionsUrl,
+		{ url, events },
 		{
+			...context.requestConfig,
 			headers: {
-				Authorization: `Bearer ${permanentToken}`,
+				...context.requestConfig.headers,
 				"Content-Type": "application/json",
 			},
 		}
 	);
-
 	return response.data as CreateWebhookResponse;
 }
 
@@ -68,36 +96,18 @@ export async function updateWebhookSubscription(
 	url: string,
 	events: string[] = ["asset.tagged", "media.tagged"]
 ): Promise<CreateWebhookResponse> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
-
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions/${id}`;
-
-	// Get permanent token for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
-	if (!permanentToken) {
-		throw new Error("Permanent token is required for webhook operations");
-	}
-
+	const context = getWebhookRequestContext(bynderClient);
 	const response = await axios.put(
-		endpoint,
+		subscriptionUrl(context, id),
+		{ url, events },
 		{
-			url,
-			events,
-		},
-		{
+			...context.requestConfig,
 			headers: {
-				Authorization: `Bearer ${permanentToken}`,
+				...context.requestConfig.headers,
 				"Content-Type": "application/json",
 			},
 		}
 	);
-
 	return response.data as CreateWebhookResponse;
 }
 
@@ -109,27 +119,8 @@ export async function deleteWebhookSubscription(
 	bynderClient: BynderClient,
 	id: string
 ): Promise<void> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
-
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions/${id}`;
-
-	// Get permanent token for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
-	if (!permanentToken) {
-		throw new Error("Permanent token is required for webhook operations");
-	}
-
-	await axios.delete(endpoint, {
-		headers: {
-			Authorization: `Bearer ${permanentToken}`,
-		},
-	});
+	const context = getWebhookRequestContext(bynderClient);
+	await axios.delete(subscriptionUrl(context, id), context.requestConfig);
 }
 
 /**
@@ -140,28 +131,11 @@ export async function getWebhookSubscription(
 	bynderClient: BynderClient,
 	id: string
 ): Promise<CreateWebhookResponse> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
-
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions/${id}`;
-
-	// Get permanent token for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
-	if (!permanentToken) {
-		throw new Error("Permanent token is required for webhook operations");
-	}
-
-	const response = await axios.get(endpoint, {
-		headers: {
-			Authorization: `Bearer ${permanentToken}`,
-		},
-	});
-
+	const context = getWebhookRequestContext(bynderClient);
+	const response = await axios.get(
+		subscriptionUrl(context, id),
+		context.requestConfig
+	);
 	return response.data as CreateWebhookResponse;
 }
 

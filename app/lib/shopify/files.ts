@@ -3,6 +3,12 @@ import FormData from "form-data";
 import { generateAltText } from "../ai/gemini-vision.js";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
+import {
+	getApprovedPortalHost,
+	isApprovedStorageHost,
+	parseSecureUrl,
+	UnapprovedBynderUrlError,
+} from "../bynder/url-policy.js";
 import { recordApiCall } from "../metrics/collector.js";
 import type { AdminApi } from "../types.js";
 import { generateFilePath, type TemplateContext } from "./file-template.js";
@@ -132,29 +138,82 @@ function fixWildcardMimeType(contentType: string, buffer: Buffer): string {
 	return contentType;
 }
 
+type DownloadHopKind = "portal" | "storage";
+
+/**
+ * Binds a download to the configured Bynder portal. The permanent token is
+ * only sent to portalHost; every other hop must be a Bynder storage host.
+ */
+interface DownloadPolicy {
+	portalHost: string;
+	permanentToken?: string;
+}
+
+const MAX_DOWNLOAD_HOPS = 3;
+
+function classifyDownloadUrl(
+	rawUrl: string,
+	policy: DownloadPolicy,
+	allowedKinds: readonly DownloadHopKind[]
+): { url: URL; kind: DownloadHopKind } {
+	const url = parseSecureUrl(rawUrl);
+	if (
+		url &&
+		allowedKinds.includes("portal") &&
+		url.hostname === policy.portalHost
+	) {
+		return { url, kind: "portal" };
+	}
+	if (
+		url &&
+		allowedKinds.includes("storage") &&
+		isApprovedStorageHost(url.hostname)
+	) {
+		return { url, kind: "storage" };
+	}
+	throw new UnapprovedBynderUrlError(
+		`Refusing to download from ${url?.hostname ?? "an invalid URL"}: not an approved Bynder ${allowedKinds.join(" or ")} host`
+	);
+}
+
+function isRedirectStatus(status: number): boolean {
+	return status >= 300 && status < 400;
+}
+
 /**
  * Download file from URL and return as buffer
- * Supports optional authentication token
  *
  * IMPORTANT: Bynder's download API returns a JSON response with an S3 URL,
  * not the actual file bytes. This function detects that pattern and follows
  * the S3 URL to download the actual file.
+ *
+ * Each hop is checked before it is requested: redirects must pass the same
+ * check as the URL that produced them, and s3_file URLs must be Bynder
+ * storage hosts.
  */
 async function downloadFile(
-	url: string,
-	authToken?: string,
+	rawUrl: string,
+	policy: DownloadPolicy,
+	allowedKinds: readonly DownloadHopKind[] = ["portal", "storage"],
 	depth = 0
 ): Promise<{ buffer: Buffer; contentType: string }> {
 	// Prevent infinite redirect loops
-	if (depth > 3) {
+	if (depth > MAX_DOWNLOAD_HOPS) {
 		throw new Error(
-			`Download redirect loop detected: Too many redirects (${depth}). URL: ${url}`
+			`Download redirect loop detected: Too many redirects (${depth}). URL: ${rawUrl}`
 		);
 	}
 
+	const { url: target, kind } = classifyDownloadUrl(
+		rawUrl,
+		policy,
+		allowedKinds
+	);
+	const url = target.href;
+
 	const headers: HeadersInit = {};
-	if (authToken) {
-		headers.Authorization = `Bearer ${authToken}`;
+	if (kind === "portal" && policy.permanentToken) {
+		headers.Authorization = `Bearer ${policy.permanentToken}`;
 	}
 
 	let response: Response;
@@ -165,6 +224,7 @@ async function downloadFile(
 
 		response = await fetch(url, {
 			headers,
+			redirect: "manual",
 			signal: controller.signal,
 		});
 
@@ -181,6 +241,17 @@ async function downloadFile(
 		throw new Error(
 			`Failed to download file from ${url}: Network error - ${errorMessage}`
 		);
+	}
+
+	if (isRedirectStatus(response.status)) {
+		const location = response.headers.get("location");
+		await response.body?.cancel();
+		if (!location) {
+			throw new Error(
+				`Failed to download file from ${url}: HTTP ${response.status} without Location header`
+			);
+		}
+		return downloadFile(new URL(location, url).href, policy, [kind], depth + 1);
 	}
 
 	if (!response.ok) {
@@ -216,8 +287,7 @@ async function downloadFile(
 				console.log(
 					`[Download] Bynder returned S3 URL redirect, following: ${jsonData.s3_file.substring(0, 100)}...`
 				);
-				// Recursively download from the actual S3 URL (no auth needed for S3)
-				return downloadFile(jsonData.s3_file, undefined, depth + 1);
+				return downloadFile(jsonData.s3_file, policy, ["storage"], depth + 1);
 			}
 
 			// If JSON but no s3_file, this is unexpected - throw error
@@ -727,6 +797,13 @@ export async function uploadBynderAsset(
 		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}
 ): Promise<{ fileId: string; fileUrl: string }> {
+	const downloadPolicy: DownloadPolicy = {
+		portalHost: getApprovedPortalHost(bynderClient.config.baseURL),
+	};
+	if ("permanentToken" in bynderClient.config) {
+		downloadPolicy.permanentToken = bynderClient.config.permanentToken;
+	}
+
 	// Get asset info from Bynder
 	const getMediaInfoParams: Parameters<BynderClient["getMediaInfo"]>[0] = {
 		id: assetId,
@@ -808,17 +885,10 @@ export async function uploadBynderAsset(
 		);
 	}
 
-	// Download the file
-	// Include permanent token in download request for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
 	let buffer: Buffer;
 	let contentType: string;
 	try {
-		const result = await downloadFile(downloadUrl, permanentToken);
+		const result = await downloadFile(downloadUrl, downloadPolicy);
 		buffer = result.buffer;
 		contentType = result.contentType;
 	} catch (error) {

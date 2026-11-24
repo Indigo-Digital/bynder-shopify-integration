@@ -5,6 +5,10 @@ import { redirect, useFetcher, useLoaderData } from "react-router";
 import { AssetBrowser } from "../components/AssetBrowser.js";
 import prisma from "../db.server.js";
 import {
+	normalizePortalApiUrl,
+	UnapprovedBynderUrlError,
+} from "../lib/bynder/url-policy.js";
+import {
 	processFileFolderTemplate,
 	type TemplateContext,
 } from "../lib/shopify/file-template.js";
@@ -125,10 +129,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 	}
 
 	if (intent === "update_bynder_url") {
-		const bynderBaseUrl = formData.get("bynderBaseUrl")?.toString();
+		const bynderBaseUrlInput = formData.get("bynderBaseUrl")?.toString();
 
-		if (!bynderBaseUrl) {
+		if (!bynderBaseUrlInput) {
 			return { error: "Bynder base URL is required" };
+		}
+
+		let bynderBaseUrl: string;
+		try {
+			bynderBaseUrl = normalizePortalApiUrl(bynderBaseUrlInput);
+		} catch (error) {
+			if (error instanceof UnapprovedBynderUrlError) {
+				return { error: error.message };
+			}
+			throw error;
 		}
 
 		await prisma.shop.upsert({

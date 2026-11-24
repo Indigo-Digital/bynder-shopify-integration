@@ -48,30 +48,49 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 			testResponse: testResponse ? "Received response" : "No response",
 		});
 	} catch (error) {
-		// Provide more detailed error information
-		let errorMessage = "Connection test failed";
-		let errorDetails = "";
+		// Stacks and raw exception messages expose server paths and dependency
+		// internals, so they stay in server logs and the client gets a summary.
+		console.error(`[Bynder Test] Connection test failed for ${shop}:`, error);
 
-		if (error instanceof Error) {
-			errorMessage = error.message;
-			errorDetails = error.stack || "";
+		return Response.json(
+			{
+				connected: false,
+				baseURL: shopConfig.bynderBaseUrl,
+				error: describeConnectionFailure(error, shopConfig.bynderBaseUrl),
+			},
+			{ status: 500 }
+		);
+	}
+};
 
-			// If it's a 404, provide helpful guidance
-			if (
-				errorMessage.includes("404") ||
-				errorMessage.includes("Not Found") ||
-				errorMessage.includes("status code 404")
-			) {
-				// Normalize URL for display
-				let normalizedUrl = shopConfig.bynderBaseUrl.trim().replace(/\/$/, "");
-				if (!normalizedUrl.endsWith("/api")) {
-					normalizedUrl = `${normalizedUrl}/api`;
-				}
+function getHttpStatus(error: unknown): number | undefined {
+	if (typeof error !== "object" || error === null) return undefined;
+	const response = (error as { response?: { status?: unknown } }).response;
+	return typeof response?.status === "number" ? response.status : undefined;
+}
 
-				errorMessage = `404 Not Found - The Bynder API endpoint was not found.
+function getNetworkErrorCode(error: unknown): string | undefined {
+	if (typeof error !== "object" || error === null) return undefined;
+	const code = (error as { code?: unknown }).code;
+	return typeof code === "string" && /^E[A-Z_]+$/.test(code) ? code : undefined;
+}
+
+function isNotFound(error: unknown): boolean {
+	if (getHttpStatus(error) === 404) return true;
+	const message = error instanceof Error ? error.message : "";
+	return message.includes("status code 404") || message.includes("Not Found");
+}
+
+function describeNotFound(bynderBaseUrl: string): string {
+	let normalizedUrl = bynderBaseUrl.trim().replace(/\/$/, "");
+	if (!normalizedUrl.endsWith("/api")) {
+		normalizedUrl = `${normalizedUrl}/api`;
+	}
+
+	return `404 Not Found - The Bynder API endpoint was not found.
 
 Troubleshooting steps:
-1. Verify your Bynder portal URL is correct: ${shopConfig.bynderBaseUrl}
+1. Verify your Bynder portal URL is correct: ${bynderBaseUrl}
 2. The URL should include /api at the end (e.g., https://portal.getbynder.com/api)
 3. Try accessing ${normalizedUrl}/v4/media in your browser to verify the API is accessible
 4. Some Bynder instances use different API versions (v6 instead of v4) or custom paths
@@ -79,20 +98,30 @@ Troubleshooting steps:
 
 Current baseURL: ${normalizedUrl}
 Expected API endpoint: ${normalizedUrl}/v4/media`;
-			}
-		}
+}
 
-		return Response.json(
-			{
-				connected: false,
-				baseURL: shopConfig.bynderBaseUrl,
-				error: errorMessage,
-				...(errorDetails && { details: errorDetails }),
-			},
-			{ status: 500 }
-		);
+/**
+ * Builds the client-facing failure message from structured error fields only,
+ * never from error.message or error.stack.
+ */
+function describeConnectionFailure(
+	error: unknown,
+	bynderBaseUrl: string
+): string {
+	if (isNotFound(error)) return describeNotFound(bynderBaseUrl);
+
+	const status = getHttpStatus(error);
+	if (status !== undefined) {
+		return `Connection test failed: Bynder responded with HTTP ${status}`;
 	}
-};
+
+	const code = getNetworkErrorCode(error);
+	if (code !== undefined) {
+		return `Connection test failed: could not reach Bynder (${code})`;
+	}
+
+	return "Connection test failed";
+}
 
 /**
  * POST handler for test connection (same as GET)

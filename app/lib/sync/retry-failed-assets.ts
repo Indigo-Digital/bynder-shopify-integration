@@ -37,8 +37,25 @@ export interface RetryResult {
 	}>;
 }
 
+export class SyncJobNotFoundError extends Error {
+	constructor(jobId: string) {
+		super(`Job ${jobId} not found`);
+		this.name = "SyncJobNotFoundError";
+	}
+}
+
+export class SyncJobAccessError extends Error {
+	constructor() {
+		super("Job does not belong to this shop");
+		this.name = "SyncJobAccessError";
+	}
+}
+
 /**
  * Retry failed assets from a sync job or specific asset IDs
+ *
+ * @throws {SyncJobNotFoundError} When `jobId` does not exist
+ * @throws {SyncJobAccessError} When `jobId` belongs to a shop other than `shopId`
  */
 export async function retryFailedAssets(
 	options: RetryOptions
@@ -55,7 +72,13 @@ export async function retryFailedAssets(
 		});
 
 		if (!job) {
-			throw new Error(`Job ${options.jobId} not found`);
+			throw new SyncJobNotFoundError(options.jobId);
+		}
+
+		// The failed-asset list below must come from this same row, never a
+		// second read, so ownership and the retried assets cannot diverge.
+		if (job.shopId !== shopId) {
+			throw new SyncJobAccessError();
 		}
 
 		// Parse errors from job

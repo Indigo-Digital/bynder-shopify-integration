@@ -7,6 +7,30 @@ import {
 } from "./error-categorization.js";
 import { syncSingleBynderAsset } from "./single-asset-sync.js";
 
+/**
+ * Each retried asset is downloaded into memory and re-uploaded, and the
+ * Bynder quota is shared by every shop on the deployment, so one retry call
+ * must stay bounded.
+ */
+export const MAX_RETRY_ASSETS = 48;
+
+const RECENT_JOBS_TO_SEARCH = 10;
+
+/**
+ * A retry request that was refused before any asset was downloaded.
+ */
+export class RetryRequestError extends Error {
+	constructor(
+		message: string,
+		readonly status: 400 | 404
+	) {
+		super(message);
+		this.name = "RetryRequestError";
+	}
+}
+
+type FailedAsset = { assetId: string; error: string };
+
 export interface RetryOptions {
 	shopId: string;
 	admin: AdminApi;
@@ -37,101 +61,117 @@ export interface RetryResult {
 	}>;
 }
 
+function parseJobErrors(jobId: string, errors: string | null): FailedAsset[] {
+	if (!errors) {
+		return [];
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(errors);
+	} catch (error) {
+		console.warn(`Failed to parse errors from job ${jobId}:`, error);
+		return [];
+	}
+	if (Array.isArray(parsed)) {
+		return parsed
+			.filter(
+				(entry): entry is { assetId: string; error?: unknown } =>
+					typeof entry?.assetId === "string" && entry.assetId.length > 0
+			)
+			.map((entry) => ({ assetId: entry.assetId, error: String(entry.error) }));
+	}
+	if (typeof parsed === "object" && parsed !== null) {
+		return Object.entries(parsed).map(([assetId, error]) => ({
+			assetId,
+			error: String(error),
+		}));
+	}
+	return [];
+}
+
+function dedupeByAssetId(assets: FailedAsset[]): FailedAsset[] {
+	const byId = new Map<string, FailedAsset>();
+	for (const asset of assets) {
+		if (!byId.has(asset.assetId)) {
+			byId.set(asset.assetId, asset);
+		}
+	}
+	return [...byId.values()];
+}
+
+async function loadJobFailures(
+	shopId: string,
+	jobId: string
+): Promise<FailedAsset[]> {
+	const job = await prisma.syncJob.findUnique({ where: { id: jobId } });
+	if (!job || job.shopId !== shopId) {
+		throw new RetryRequestError(`Job ${jobId} not found`, 404);
+	}
+	return dedupeByAssetId(parseJobErrors(job.id, job.errors));
+}
+
+/**
+ * Only ids recorded as failed on this shop's recent jobs are retried, so a
+ * caller cannot use the retry path to sync arbitrary Bynder assets.
+ */
+async function loadRequestedFailures(
+	shopId: string,
+	assetIds: string[]
+): Promise<FailedAsset[]> {
+	const requested = new Set(assetIds);
+	if (requested.size > MAX_RETRY_ASSETS) {
+		throw new RetryRequestError(
+			`At most ${MAX_RETRY_ASSETS} assets can be retried at once`,
+			400
+		);
+	}
+
+	const recentJobs = await prisma.syncJob.findMany({
+		where: {
+			shopId,
+			status: { in: ["completed", "failed"] },
+		},
+		orderBy: { createdAt: "desc" },
+		take: RECENT_JOBS_TO_SEARCH,
+	});
+
+	const matches = recentJobs
+		.flatMap((job) => parseJobErrors(job.id, job.errors))
+		.filter((failure) => requested.has(failure.assetId));
+	const failedAssets = dedupeByAssetId(matches);
+
+	if (failedAssets.length === 0) {
+		throw new RetryRequestError(
+			"None of the requested assets failed in this shop's recent sync jobs",
+			404
+		);
+	}
+	return failedAssets;
+}
+
+async function loadFailedAssets(options: RetryOptions): Promise<FailedAsset[]> {
+	if (options.jobId) {
+		return loadJobFailures(options.shopId, options.jobId);
+	}
+	if (options.assetIds && options.assetIds.length > 0) {
+		return loadRequestedFailures(options.shopId, options.assetIds);
+	}
+	throw new RetryRequestError("Either jobId or assetIds must be provided", 400);
+}
+
 /**
  * Retry failed assets from a sync job or specific asset IDs
+ *
+ * @throws {RetryRequestError} When the job is not this shop's, no requested id
+ * failed for this shop, or more than MAX_RETRY_ASSETS would be retried. No
+ * asset is downloaded in these cases.
  */
 export async function retryFailedAssets(
 	options: RetryOptions
 ): Promise<RetryResult> {
 	const { shopId, admin, bynderClient, onlyTransient = false } = options;
 
-	// Get failed assets to retry
-	let failedAssets: Array<{ assetId: string; error: string }> = [];
-
-	if (options.jobId) {
-		// Get failed assets from the job
-		const job = await prisma.syncJob.findUnique({
-			where: { id: options.jobId },
-		});
-
-		if (!job) {
-			throw new Error(`Job ${options.jobId} not found`);
-		}
-
-		// Parse errors from job
-		if (job.errors) {
-			try {
-				const parsed = JSON.parse(job.errors);
-				if (Array.isArray(parsed)) {
-					failedAssets = parsed;
-				} else if (typeof parsed === "object" && parsed !== null) {
-					// Convert object format to array
-					failedAssets = Object.entries(parsed).map(([assetId, error]) => ({
-						assetId,
-						error: String(error),
-					}));
-				}
-			} catch (error) {
-				console.warn(
-					`Failed to parse errors from job ${options.jobId}:`,
-					error
-				);
-			}
-		}
-	} else if (options.assetIds && options.assetIds.length > 0) {
-		// Get errors for specific assets from recent jobs
-		// We'll need to find which job(s) these assets failed in
-		const recentJobs = await prisma.syncJob.findMany({
-			where: {
-				shopId,
-				status: { in: ["completed", "failed"] },
-			},
-			orderBy: { createdAt: "desc" },
-			take: 10, // Check last 10 jobs
-		});
-
-		for (const job of recentJobs) {
-			if (job.errors) {
-				try {
-					const parsed = JSON.parse(job.errors);
-					let jobErrors: Array<{ assetId: string; error: string }> = [];
-					if (Array.isArray(parsed)) {
-						jobErrors = parsed;
-					} else if (typeof parsed === "object" && parsed !== null) {
-						jobErrors = Object.entries(parsed).map(([assetId, error]) => ({
-							assetId,
-							error: String(error),
-						}));
-					}
-
-					// Filter to only include requested asset IDs
-					for (const err of jobErrors) {
-						if (
-							options.assetIds.includes(err.assetId) &&
-							!failedAssets.find((a) => a.assetId === err.assetId)
-						) {
-							failedAssets.push(err);
-						}
-					}
-				} catch (error) {
-					console.warn(`Failed to parse errors from job ${job.id}:`, error);
-				}
-			}
-		}
-
-		// If we couldn't find errors for some assets, still try to retry them
-		// (they might have been skipped or had other issues)
-		for (const assetId of options.assetIds) {
-			if (!failedAssets.find((a) => a.assetId === assetId)) {
-				failedAssets.push({
-					assetId,
-					error: "Previous error not found, retrying anyway",
-				});
-			}
-		}
-	} else {
-		throw new Error("Either jobId or assetIds must be provided");
-	}
+	const failedAssets = await loadFailedAssets(options);
 
 	if (failedAssets.length === 0) {
 		return {
@@ -176,6 +216,13 @@ export async function retryFailedAssets(
 			],
 			results: [],
 		};
+	}
+
+	if (assetsToRetry.length > MAX_RETRY_ASSETS) {
+		throw new RetryRequestError(
+			`${assetsToRetry.length} assets would be retried; at most ${MAX_RETRY_ASSETS} can be retried at once`,
+			400
+		);
 	}
 
 	// Retry each asset

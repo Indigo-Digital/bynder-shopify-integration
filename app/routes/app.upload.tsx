@@ -12,6 +12,12 @@ import {
 } from "react-router";
 import prisma from "../db.server.js";
 import { generateAltText } from "../lib/ai/gemini-vision.js";
+import {
+	BodyTooLargeError,
+	MAX_ASSET_BYTES,
+	MULTIPART_OVERHEAD_BYTES,
+	readRequestFormData,
+} from "../lib/http/body-limits.js";
 import { uploadBufferToShopify } from "../lib/shopify/files.js";
 import { setFileTags } from "../lib/shopify/metafields.js";
 import { authenticate } from "../shopify.server.js";
@@ -28,9 +34,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	return { aiAltTextAvailable: shopConfig?.enableAutoAltText || false };
 };
 
+function uploadTooLarge() {
+	return data(
+		{ error: new BodyTooLargeError("upload", MAX_ASSET_BYTES).message },
+		{ status: 413 }
+	);
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
 	const { admin, session } = await authenticate.admin(request);
-	const formData = await request.formData();
+	let formData: FormData;
+	try {
+		formData = await readRequestFormData(
+			request,
+			MAX_ASSET_BYTES + MULTIPART_OVERHEAD_BYTES
+		);
+	} catch (error) {
+		if (error instanceof BodyTooLargeError) {
+			return uploadTooLarge();
+		}
+		throw error;
+	}
 
 	const file = formData.get("file") as File;
 	const folder = (formData.get("folder") as string) || "";
@@ -39,6 +63,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 	if (!file) {
 		return data({ error: "No file provided" }, { status: 400 });
+	}
+	if (file.size > MAX_ASSET_BYTES) {
+		return uploadTooLarge();
 	}
 
 	try {

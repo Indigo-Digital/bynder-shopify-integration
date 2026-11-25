@@ -1,6 +1,12 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
+import {
+	BodyTooLargeError,
+	MAX_REQUEST_BODY_BYTES,
+	readRequestFormData,
+	readRequestText,
+} from "../lib/http/body-limits.js";
 import { retryFailedAssets } from "../lib/sync/retry-failed-assets.js";
 import { authenticate } from "../shopify.server.js";
 
@@ -40,10 +46,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		try {
 			const contentType = request.headers.get("content-type");
 			if (contentType?.includes("application/json")) {
-				body = await request.json();
+				body = JSON.parse(
+					await readRequestText(request, MAX_REQUEST_BODY_BYTES)
+				);
 			} else {
 				// Handle form data
-				const formData = await request.formData();
+				const formData = await readRequestFormData(
+					request,
+					MAX_REQUEST_BODY_BYTES
+				);
 				const jobIdValue = formData.get("jobId")?.toString();
 				const assetIdsValue = formData.get("assetIds")?.toString();
 				body = {
@@ -54,7 +65,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 					onlyTransient: formData.get("onlyTransient") === "true",
 				};
 			}
-		} catch (_error) {
+		} catch (error) {
+			if (error instanceof BodyTooLargeError) {
+				return Response.json({ error: error.message }, { status: 413 });
+			}
 			return Response.json({ error: "Invalid request body" }, { status: 400 });
 		}
 

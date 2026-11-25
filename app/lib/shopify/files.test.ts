@@ -61,13 +61,11 @@ describe("uploadBynderAsset", () => {
 		global.fetch = mockFetch;
 
 		// First fetch: Download from Bynder
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			arrayBuffer: async () => new ArrayBuffer(8),
-			headers: {
-				get: () => "image/jpeg",
-			},
-		});
+		mockFetch.mockResolvedValueOnce(
+			new Response(new Uint8Array(8), {
+				headers: { "content-type": "image/jpeg" },
+			})
+		);
 
 		// Second fetch: Upload to staged URL (we're using fetch now instead of axios)
 		// Need 3 mocks for retry attempts (MAX_RETRIES = 3)
@@ -176,13 +174,11 @@ describe("uploadBynderAsset", () => {
 		global.fetch = mockFetch;
 
 		// First fetch: Download from Bynder
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			arrayBuffer: async () => new ArrayBuffer(8),
-			headers: {
-				get: () => "image/jpeg",
-			},
-		});
+		mockFetch.mockResolvedValueOnce(
+			new Response(new Uint8Array(8), {
+				headers: { "content-type": "image/jpeg" },
+			})
+		);
 
 		// Second fetch: Upload to staged URL (we're using fetch now instead of axios)
 		// Need 3 mocks for retry attempts (MAX_RETRIES = 3)

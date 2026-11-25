@@ -5,6 +5,11 @@ import { redirect, useFetcher, useLoaderData } from "react-router";
 import { AssetBrowser } from "../components/AssetBrowser.js";
 import prisma from "../db.server.js";
 import {
+	MAX_REQUEST_BODY_BYTES,
+	readRequestFormData,
+	rejectOversizedBody,
+} from "../lib/http/body-limits.js";
+import {
 	processFileFolderTemplate,
 	type TemplateContext,
 } from "../lib/shopify/file-template.js";
@@ -97,7 +102,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
 	const { session } = await authenticate.admin(request);
 	const shop = session.shop;
-	const formData = await request.formData();
+	const formData = await readRequestFormData(
+		request,
+		MAX_REQUEST_BODY_BYTES
+	).catch(rejectOversizedBody);
 	const intent = formData.get("intent");
 
 	if (intent === "update_sync_tags") {

@@ -10,6 +10,11 @@ import {
 	updateWebhookSubscription,
 } from "../lib/bynder/webhooks.js";
 import { env } from "../lib/env.server.js";
+import {
+	MAX_REQUEST_BODY_BYTES,
+	readRequestFormData,
+	rejectOversizedBody,
+} from "../lib/http/body-limits.js";
 import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -141,7 +146,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
 	const { session } = await authenticate.admin(request);
 	const shop = session.shop;
-	const formData = await request.formData();
+	const formData = await readRequestFormData(
+		request,
+		MAX_REQUEST_BODY_BYTES
+	).catch(rejectOversizedBody);
 	const intent = formData.get("intent");
 
 	if (intent === "toggle_webhook") {

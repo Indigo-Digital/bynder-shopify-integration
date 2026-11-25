@@ -6,6 +6,11 @@ import {
 	verifyWebhookSignature,
 } from "../lib/bynder/webhooks.js";
 import { env } from "../lib/env.server.js";
+import {
+	BodyTooLargeError,
+	MAX_REQUEST_BODY_BYTES,
+	readRequestText,
+} from "../lib/http/body-limits.js";
 import { syncSingleBynderAsset } from "../lib/sync/single-asset-sync.js";
 import { authenticate } from "../shopify.server.js";
 
@@ -22,7 +27,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 	try {
 		// Get raw body for signature verification
-		const rawBody = await request.text();
+		const rawBody = await readRequestText(request, MAX_REQUEST_BODY_BYTES);
 		let body: {
 			eventType?: string;
 			type?: string;
@@ -259,6 +264,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 		return Response.json({ success: true, skipped: true });
 	} catch (error) {
+		if (error instanceof BodyTooLargeError) {
+			return Response.json({ error: error.message }, { status: 413 });
+		}
 		console.error("Bynder webhook error:", error);
 		const errorMessage =
 			error instanceof Error ? error.message : "Internal server error";

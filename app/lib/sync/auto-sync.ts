@@ -11,6 +11,11 @@ import { uploadBynderAsset } from "../shopify/files.js";
 import type { AdminApi } from "../types.js";
 import { categorizeErrors } from "./error-categorization.js";
 import { retryFailedAssets } from "./retry-failed-assets.js";
+import {
+	getScannableSyncTags,
+	MAX_SYNC_TAGS,
+	parseSyncTags,
+} from "./sync-tags.js";
 
 interface SyncOptions {
 	shopId: string;
@@ -40,11 +45,13 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		throw new Error(`Shop ${shopId} not found`);
 	}
 
-	// Parse sync tags (comma-separated)
-	const syncTags = shop.syncTags
-		.split(",")
-		.map((tag: string) => tag.trim())
-		.filter((tag: string) => tag.length > 0);
+	const configuredTagCount = parseSyncTags(shop.syncTags).length;
+	const syncTags = getScannableSyncTags(shop.syncTags);
+	if (configuredTagCount > MAX_SYNC_TAGS) {
+		console.warn(
+			`[Sync] Shop ${shopId} has ${configuredTagCount} sync tags configured; only the first ${MAX_SYNC_TAGS} will be synced`
+		);
+	}
 
 	if (syncTags.length === 0) {
 		return { processed: 0, created: 0, updated: 0, errors: [] };
@@ -105,6 +112,20 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 			[];
 
 		for (const tag of syncTags) {
+			if (await checkCancellation()) {
+				console.log(
+					`[Sync Job] Job ${syncJob.id} was cancelled while fetching assets`
+				);
+				await prisma.syncJob.update({
+					where: { id: syncJob.id },
+					data: {
+						status: "cancelled",
+						completedAt: new Date(),
+						assetsProcessed: 0,
+					},
+				});
+				return { processed: 0, created, updated, errors };
+			}
 			console.log(`[Sync Job ${syncJob.id}] Fetching assets with tag: ${tag}`);
 			const response = await bynderClient.getAllMediaItems({
 				tags: tag,
@@ -198,7 +219,7 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 							filenameSuffix: shop.filenameSuffix,
 							altTextPrefix: shop.altTextPrefix,
 							enableAutoAltText: shop.enableAutoAltText,
-							syncTags: shop.syncTags,
+							syncTags: syncTags.join(","),
 							syncJobId: syncJob.id,
 						}
 					);

@@ -8,6 +8,7 @@ import {
 	processFileFolderTemplate,
 	type TemplateContext,
 } from "../lib/shopify/file-template.js";
+import { MAX_SYNC_TAGS, parseSyncTags } from "../lib/sync/sync-tags.js";
 import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -102,13 +103,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 	if (intent === "update_sync_tags") {
 		const syncTagsInput = formData.get("syncTags")?.toString() || "";
-		// Parse comma-separated tags, trim, and filter empty
-		const syncTags =
-			syncTagsInput
-				.split(",")
-				.map((tag: string) => tag.trim())
-				.filter((tag: string) => tag.length > 0)
-				.join(",") || "shopify-sync";
+		const submittedTags = parseSyncTags(syncTagsInput);
+		if (submittedTags.length > MAX_SYNC_TAGS) {
+			return {
+				error: `You can configure at most ${MAX_SYNC_TAGS} sync tags (received ${submittedTags.length}).`,
+			};
+		}
+		const syncTags = submittedTags.join(",") || "shopify-sync";
 
 		await prisma.shop.upsert({
 			where: { shop },

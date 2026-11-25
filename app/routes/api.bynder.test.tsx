@@ -29,7 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	try {
 		// Create client with permanent token from env
 		// createFromEnv will automatically append /api if needed
-		const bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
+		const bynderClient = BynderClient.createFromEnv(
+			shopConfig.bynderBaseUrl,
+			shopConfig.shop
+		);
 
 		// Test connection by making a simple API call
 		// Try getMediaList first (most common endpoint)

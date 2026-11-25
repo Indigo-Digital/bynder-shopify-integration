@@ -68,7 +68,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		// Initialize Bynder client
 		let bynderClient: BynderClient;
 		try {
-			bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
+			bynderClient = BynderClient.createFromEnv(
+				shopConfig.bynderBaseUrl,
+				shopConfig.shop
+			);
 		} catch (error) {
 			return Response.json(
 				{

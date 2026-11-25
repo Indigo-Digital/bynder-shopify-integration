@@ -43,7 +43,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		}
 
 		// Initialize Bynder client
-		const bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
+		const bynderClient = BynderClient.createFromEnv(
+			shopConfig.bynderBaseUrl,
+			shopConfig.shop
+		);
 
 		// Get a real asset ID from Bynder for testing (or use a test ID)
 		// For now, we'll use a test asset ID and let the sync handle it

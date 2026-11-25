@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
+import { BynderRateLimitError } from "../lib/bynder/rate-limiter.js";
 import type { BynderAsset } from "../lib/bynder/types.js";
 import { authenticate } from "../shopify.server.js";
 
@@ -12,6 +13,21 @@ interface AssetsResponse {
 	hasMore: boolean;
 }
 
+const DEFAULT_PAGE_SIZE = 24;
+const MAX_PAGE_SIZE = 100;
+
+function parseBoundedInt(
+	value: string | null,
+	fallback: number,
+	max = Number.MAX_SAFE_INTEGER
+): number {
+	const parsed = Number.parseInt(value ?? "", 10);
+	if (!Number.isFinite(parsed) || parsed < 1) {
+		return fallback;
+	}
+	return Math.min(parsed, max);
+}
+
 /**
  * GET /api/bynder/assets - Fetch assets from Bynder with search/filter support
  * Query parameters:
@@ -19,7 +35,7 @@ interface AssetsResponse {
  * - tags: Comma-separated tags to filter by
  * - type: Asset type filter (image, video, document, etc.)
  * - page: Page number (default: 1)
- * - limit: Results per page (default: 24)
+ * - limit: Results per page (default: 24, max: 100)
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
 	const { session } = await authenticate.admin(request);
@@ -51,11 +67,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 					.filter(Boolean)
 			: undefined;
 		const type = url.searchParams.get("type") || undefined;
-		const page = parseInt(url.searchParams.get("page") || "1", 10);
-		const limit = parseInt(url.searchParams.get("limit") || "24", 10);
+		const page = parseBoundedInt(url.searchParams.get("page"), 1);
+		const limit = parseBoundedInt(
+			url.searchParams.get("limit"),
+			DEFAULT_PAGE_SIZE,
+			MAX_PAGE_SIZE
+		);
 
 		// Create Bynder client
-		const bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
+		const bynderClient = BynderClient.createFromEnv(
+			shopConfig.bynderBaseUrl,
+			shop
+		);
 
 		// Build query parameters
 		const queryParams: Parameters<typeof bynderClient.getMediaList>[0] = {
@@ -114,6 +137,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 		return Response.json(result);
 	} catch (error) {
+		if (error instanceof BynderRateLimitError) {
+			return Response.json({ error: error.message }, { status: 429 });
+		}
 		console.error("Error fetching Bynder assets:", error);
 		let errorMessage = "Failed to fetch assets from Bynder";
 		if (error instanceof Error) {

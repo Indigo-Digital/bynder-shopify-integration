@@ -153,7 +153,8 @@ async function processJobs() {
 
 				// Initialize Bynder client
 				const bynderClient = BynderClient.createFromEnv(
-					shopConfig.bynderBaseUrl
+					shopConfig.bynderBaseUrl,
+					shopConfig.shop
 				);
 
 				// Get admin API using offline session (persists regardless of user browser)

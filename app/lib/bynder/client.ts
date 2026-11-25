@@ -1,7 +1,8 @@
 import Bynder from "@bynder/bynder-js-sdk";
 import { env } from "../env.server.js";
 import { recordApiCall, recordRateLimitHit } from "../metrics/collector.js";
-import { getRateLimiter } from "./rate-limiter.js";
+import type { MetricMetadata, MetricName } from "../metrics/types.js";
+import { BynderRateLimitError, getRateLimiter } from "./rate-limiter.js";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
 
 export interface BynderPermanentTokenConfig {
@@ -11,12 +12,26 @@ export interface BynderPermanentTokenConfig {
 	clientSecret: string;
 }
 
+interface CallMetricsParams {
+	shopId?: string;
+	syncJobId?: string;
+}
+
 export class BynderClient {
 	private bynder: Bynder;
 	public config: BynderConfig | BynderPermanentTokenConfig;
+	/**
+	 * Identifies whose share of the process-wide Bynder rate limit this
+	 * client's calls draw from (the shop domain when known)
+	 */
+	private readonly rateLimitKey: string;
 
-	constructor(config: BynderConfig | BynderPermanentTokenConfig) {
+	constructor(
+		config: BynderConfig | BynderPermanentTokenConfig,
+		rateLimitKey?: string
+	) {
 		this.config = config;
+		this.rateLimitKey = rateLimitKey || config.baseURL;
 		const bynderConfig: {
 			baseURL: string;
 			clientId: string;
@@ -42,20 +57,24 @@ export class BynderClient {
 	 * Create client using permanent token (recommended for all operations)
 	 */
 	static createPermanentTokenClient(
-		config: BynderPermanentTokenConfig
+		config: BynderPermanentTokenConfig,
+		rateLimitKey?: string
 	): BynderClient {
 		if (!config.permanentToken) {
 			throw new Error("permanentToken is required");
 		}
-		return new BynderClient(config);
+		return new BynderClient(config, rateLimitKey);
 	}
 
 	/**
 	 * Create client using permanent token from environment variables
 	 * Requires baseURL (typically from shop config) and uses env vars for token/credentials
 	 * Automatically appends /api to the baseURL if not present
+	 *
+	 * @param shop - Shop domain the client acts for; its calls are queued
+	 * separately from other shops' calls under the shared rate limit
 	 */
-	static createFromEnv(baseURL: string): BynderClient {
+	static createFromEnv(baseURL: string, shop?: string): BynderClient {
 		if (!env.BYNDER_PERMANENT_TOKEN) {
 			throw new Error(
 				"BYNDER_PERMANENT_TOKEN environment variable is required"
@@ -76,12 +95,15 @@ export class BynderClient {
 			normalizedBaseURL = `${normalizedBaseURL}/api`;
 		}
 
-		return BynderClient.createPermanentTokenClient({
-			baseURL: normalizedBaseURL,
-			permanentToken: env.BYNDER_PERMANENT_TOKEN,
-			clientId: env.BYNDER_CLIENT_ID,
-			clientSecret: env.BYNDER_CLIENT_SECRET,
-		});
+		return BynderClient.createPermanentTokenClient(
+			{
+				baseURL: normalizedBaseURL,
+				permanentToken: env.BYNDER_PERMANENT_TOKEN,
+				clientId: env.BYNDER_CLIENT_ID,
+				clientSecret: env.BYNDER_CLIENT_SECRET,
+			},
+			shop
+		);
 	}
 
 	/**
@@ -152,6 +174,37 @@ export class BynderClient {
 	}
 
 	/**
+	 * Wait for this client's turn under the shared Bynder rate limit and
+	 * record the call in metrics when a shopId is given
+	 *
+	 * @throws {BynderRateLimitError} When this client's shop already has the
+	 * maximum number of calls waiting
+	 */
+	private async acquireRateLimit(
+		apiCall: MetricName,
+		params: CallMetricsParams,
+		metadata?: MetricMetadata
+	): Promise<void> {
+		const rateLimiter = getRateLimiter();
+		const wasRateLimited =
+			rateLimiter.getAvailableTokens() < 1 || rateLimiter.getPendingCount() > 0;
+		const acquired = await rateLimiter.acquire(this.rateLimitKey);
+
+		if (params.shopId) {
+			if (acquired) {
+				await recordApiCall(params.shopId, apiCall, params.syncJobId, metadata);
+			}
+			if (wasRateLimited) {
+				await recordRateLimitHit(params.shopId, params.syncJobId);
+			}
+		}
+
+		if (!acquired) {
+			throw new BynderRateLimitError();
+		}
+	}
+
+	/**
 	 * Get media list with optional filters
 	 */
 	async getMediaList(params: {
@@ -163,21 +216,7 @@ export class BynderClient {
 		shopId?: string; // Optional shopId for metrics tracking
 		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}) {
-		const rateLimiter = getRateLimiter();
-		const wasRateLimited = rateLimiter.getAvailableTokens() < 1;
-		await rateLimiter.acquire();
-
-		// Track metrics if shopId is provided
-		if (params.shopId) {
-			await recordApiCall(
-				params.shopId,
-				"bynder_getMediaList",
-				params.syncJobId
-			);
-			if (wasRateLimited) {
-				await recordRateLimitHit(params.shopId, params.syncJobId);
-			}
-		}
+		await this.acquireRateLimit("bynder_getMediaList", params);
 
 		// Remove shopId and syncJobId from params before calling SDK
 		const { shopId: _shopId, syncJobId: _syncJobId, ...sdkParams } = params;
@@ -192,22 +231,9 @@ export class BynderClient {
 		shopId?: string; // Optional shopId for metrics tracking
 		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}) {
-		const rateLimiter = getRateLimiter();
-		const wasRateLimited = rateLimiter.getAvailableTokens() < 1;
-		await rateLimiter.acquire();
-
-		// Track metrics if shopId is provided
-		if (params.shopId) {
-			await recordApiCall(
-				params.shopId,
-				"bynder_getMediaInfo",
-				params.syncJobId,
-				{ assetId: params.id }
-			);
-			if (wasRateLimited) {
-				await recordRateLimitHit(params.shopId, params.syncJobId);
-			}
-		}
+		await this.acquireRateLimit("bynder_getMediaInfo", params, {
+			assetId: params.id,
+		});
 
 		// Remove shopId and syncJobId from params before calling SDK
 		const { shopId: _shopId, syncJobId: _syncJobId, ...sdkParams } = params;
@@ -224,22 +250,9 @@ export class BynderClient {
 		shopId?: string; // Optional shopId for metrics tracking
 		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}): Promise<string> {
-		const rateLimiter = getRateLimiter();
-		const wasRateLimited = rateLimiter.getAvailableTokens() < 1;
-		await rateLimiter.acquire();
-
-		// Track metrics if shopId is provided
-		if (params.shopId) {
-			await recordApiCall(
-				params.shopId,
-				"bynder_getMediaDownloadUrl",
-				params.syncJobId,
-				{ assetId: params.id }
-			);
-			if (wasRateLimited) {
-				await recordRateLimitHit(params.shopId, params.syncJobId);
-			}
-		}
+		await this.acquireRateLimit("bynder_getMediaDownloadUrl", params, {
+			assetId: params.id,
+		});
 
 		try {
 			// Try SDK method first

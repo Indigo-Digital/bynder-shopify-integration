@@ -78,6 +78,7 @@ describe("api.sync", () => {
 		id: "shop-123",
 		shop: "test-shop.myshopify.com",
 		bynderBaseUrl: "https://test.bynder.com/api",
+		syncJobs: [],
 	};
 
 	beforeEach(() => {

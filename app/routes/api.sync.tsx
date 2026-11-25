@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
 import { uploadBynderAsset } from "../lib/shopify/files.js";
+import { ACTIVE_SYNC_JOB_STATUSES } from "../lib/sync/sync-jobs.js";
 import { authenticate } from "../shopify.server.js";
 
 /**
@@ -77,6 +78,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		// Get shop configuration
 		const shopConfig = await prisma.shop.findUnique({
 			where: { shop },
+			include: {
+				syncJobs: {
+					where: { status: { in: [...ACTIVE_SYNC_JOB_STATUSES] } },
+					orderBy: { createdAt: "asc" },
+					take: 1,
+				},
+			},
 		});
 
 		if (!shopConfig || !shopConfig.bynderBaseUrl) {
@@ -186,6 +194,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 			return Response.json({ success: true, fileId, fileUrl });
 		} else {
+			// One active full sync per shop keeps a single merchant from
+			// filling the shared worker queue with repeated jobs.
+			const activeJob = shopConfig.syncJobs[0];
+			if (activeJob) {
+				return Response.json(
+					{
+						error: "A sync job is already queued or running for this shop.",
+						jobId: activeJob.id,
+					},
+					{ status: 409 }
+				);
+			}
+
 			// Sync all assets - create background job and return immediately
 			const syncJob = await prisma.syncJob.create({
 				data: {

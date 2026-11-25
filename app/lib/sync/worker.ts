@@ -8,6 +8,7 @@ import prisma from "../../db.server.js";
 import { unauthenticated } from "../../shopify.server.js";
 import { BynderClient } from "../bynder/client.js";
 import { syncBynderAssets } from "./auto-sync.js";
+import { supersedePendingSyncJobs } from "./sync-jobs.js";
 
 console.log("[Worker] Imports loaded successfully");
 
@@ -139,6 +140,20 @@ async function processJobs() {
 					`[Worker] Job ${pendingJob.id} was already running, resuming...`
 				);
 			}
+
+			await withPrismaRetry(() => supersedePendingSyncJobs(pendingJob))
+				.then((count) => {
+					if (count > 0) {
+						console.log(
+							`[Worker] Cancelled ${count} duplicate pending job(s) for shop ${pendingJob.shopId}`
+						);
+					}
+				})
+				.catch((supersedeError) => {
+					console.error(
+						`[Worker] Failed to cancel duplicate pending jobs: ${supersedeError instanceof Error ? supersedeError.message : String(supersedeError)}`
+					);
+				});
 
 			console.log(
 				`[Worker] Processing job ${pendingJob.id} for shop ${pendingJob.shop.shop}`

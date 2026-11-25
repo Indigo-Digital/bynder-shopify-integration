@@ -3,6 +3,11 @@ import FormData from "form-data";
 import { generateAltText } from "../ai/gemini-vision.js";
 import type { BynderClient } from "../bynder/client.js";
 import type { BynderMediaInfoResponse } from "../bynder/types.js";
+import {
+	BodyTooLargeError,
+	MAX_ASSET_BYTES,
+	readResponseBody,
+} from "../http/body-limits.js";
 import { recordApiCall } from "../metrics/collector.js";
 import type { AdminApi } from "../types.js";
 import { generateFilePath, type TemplateContext } from "./file-template.js";
@@ -132,6 +137,49 @@ function fixWildcardMimeType(contentType: string, buffer: Buffer): string {
 	return contentType;
 }
 
+const DOWNLOAD_TIMEOUT_MS = 2 * 60 * 1000;
+
+function toDownloadError(error: unknown, url: string): Error {
+	if (error instanceof BodyTooLargeError) {
+		return error;
+	}
+	if (error instanceof Error && error.name === "AbortError") {
+		return new Error(
+			`Download timeout: File download from Bynder took longer than 2 minutes. URL: ${url}`
+		);
+	}
+	const errorMessage = error instanceof Error ? error.message : String(error);
+	return new Error(
+		`Failed to download file from ${url}: Network error - ${errorMessage}`
+	);
+}
+
+/**
+ * Returns the S3 URL from a Bynder download-API JSON body, or null when the
+ * body is not valid JSON (it is then treated as file bytes).
+ */
+function extractS3FileUrl(buffer: Buffer): string | null {
+	let jsonData: unknown;
+	try {
+		jsonData = JSON.parse(buffer.toString("utf8"));
+	} catch (parseError) {
+		console.warn(
+			`[Download] Response had JSON content-type but failed to parse: ${parseError}`
+		);
+		return null;
+	}
+	const record =
+		jsonData && typeof jsonData === "object"
+			? (jsonData as Record<string, unknown>)
+			: {};
+	if (typeof record.s3_file === "string" && record.s3_file) {
+		return record.s3_file;
+	}
+	throw new Error(
+		`Bynder returned unexpected JSON response without s3_file. Keys: ${Object.keys(record).join(", ")}`
+	);
+}
+
 /**
  * Download file from URL and return as buffer
  * Supports optional authentication token
@@ -157,90 +205,49 @@ async function downloadFile(
 		headers.Authorization = `Bearer ${authToken}`;
 	}
 
+	// The timeout spans the body read so a body that trickles in cannot hold
+	// the sync slot open indefinitely.
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
 	let response: Response;
+	let buffer: Buffer;
 	try {
-		// Create abort controller for timeout (2 minutes for download)
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 2 * 60 * 1000);
-
 		response = await fetch(url, {
 			headers,
 			signal: controller.signal,
 		});
-
-		clearTimeout(timeoutId);
+		buffer = await readResponseBody(response, MAX_ASSET_BYTES);
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		// Check if it's an abort error (timeout)
-		if (error instanceof Error && error.name === "AbortError") {
-			throw new Error(
-				`Download timeout: File download from Bynder took longer than 2 minutes. URL: ${url}`
-			);
-		}
-		// Generic network error
-		throw new Error(
-			`Failed to download file from ${url}: Network error - ${errorMessage}`
-		);
+		throw toDownloadError(error, url);
+	} finally {
+		clearTimeout(timeoutId);
 	}
 
 	if (!response.ok) {
 		const statusText = response.statusText || "Unknown error";
-		const statusCode = response.status;
-		let errorDetails = `HTTP ${statusCode}: ${statusText}`;
-
-		// Try to get error body if available
-		try {
-			const errorBody = await response.text();
-			if (errorBody && errorBody.length < 500) {
-				errorDetails += ` - ${errorBody}`;
-			}
-		} catch {
-			// Ignore errors reading response body
+		let errorDetails = `HTTP ${response.status}: ${statusText}`;
+		const errorBody = buffer.toString("utf8");
+		if (errorBody && errorBody.length < 500) {
+			errorDetails += ` - ${errorBody}`;
 		}
-
 		throw new Error(`Failed to download file from ${url}: ${errorDetails}`);
 	}
 
-	// Check if response is JSON with s3_file (Bynder's download API pattern)
-	// Bynder's /v4/media/{id}/download endpoint returns JSON like:
+	// Bynder's /v4/media/{id}/download endpoint returns JSON like
 	// {"s3_file": "https://bynder-media-*.s3.*.amazonaws.com/..."}
 	const responseContentType =
 		response.headers.get("content-type") || "application/octet-stream";
 
 	if (responseContentType.includes("application/json")) {
-		try {
-			const jsonData = await response.json();
-
-			// Check for Bynder's s3_file redirect pattern
-			if (jsonData.s3_file && typeof jsonData.s3_file === "string") {
-				console.log(
-					`[Download] Bynder returned S3 URL redirect, following: ${jsonData.s3_file.substring(0, 100)}...`
-				);
-				// Recursively download from the actual S3 URL (no auth needed for S3)
-				return downloadFile(jsonData.s3_file, undefined, depth + 1);
-			}
-
-			// If JSON but no s3_file, this is unexpected - throw error
-			throw new Error(
-				`Bynder returned unexpected JSON response without s3_file. Keys: ${Object.keys(jsonData).join(", ")}`
+		const s3FileUrl = extractS3FileUrl(buffer);
+		if (s3FileUrl) {
+			console.log(
+				`[Download] Bynder returned S3 URL redirect, following: ${s3FileUrl.substring(0, 100)}...`
 			);
-		} catch (parseError) {
-			// If JSON parsing fails, it might be a different content type that included "json"
-			// Fall through to treat as binary
-			if (
-				parseError instanceof Error &&
-				parseError.message.includes("s3_file")
-			) {
-				throw parseError;
-			}
-			console.warn(
-				`[Download] Response had JSON content-type but failed to parse: ${parseError}`
-			);
+			// No auth needed for S3
+			return downloadFile(s3FileUrl, undefined, depth + 1);
 		}
 	}
-
-	const arrayBuffer = await response.arrayBuffer();
-	const buffer = Buffer.from(arrayBuffer);
 
 	// Fix wildcard MIME types (like "image/*") by detecting actual type
 	const fixedContentType = fixWildcardMimeType(responseContentType, buffer);

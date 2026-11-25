@@ -1,5 +1,11 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
+import {
+	BodyTooLargeError,
+	MAX_REQUEST_BODY_BYTES,
+	readRequestFormData,
+	readRequestText,
+} from "../lib/http/body-limits.js";
 import { authenticate } from "../shopify.server.js";
 
 /**
@@ -28,10 +34,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		let jobId: string | null = null;
 		const contentType = request.headers.get("content-type");
 		if (contentType?.includes("application/json")) {
-			const body = await request.json().catch(() => ({}));
-			jobId = body.jobId;
+			const text = await readRequestText(request, MAX_REQUEST_BODY_BYTES);
+			let body: { jobId?: string } = {};
+			try {
+				body = JSON.parse(text);
+			} catch {
+				// Treated as a missing jobId below
+			}
+			jobId = body?.jobId ?? null;
 		} else {
-			const formData = await request.formData();
+			const formData = await readRequestFormData(
+				request,
+				MAX_REQUEST_BODY_BYTES
+			);
 			jobId = formData.get("jobId")?.toString() || null;
 		}
 
@@ -78,6 +93,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			message: "Job cancelled successfully",
 		});
 	} catch (error) {
+		if (error instanceof BodyTooLargeError) {
+			return Response.json({ error: error.message }, { status: 413 });
+		}
 		console.error("Cancel job error:", error);
 		return Response.json(
 			{

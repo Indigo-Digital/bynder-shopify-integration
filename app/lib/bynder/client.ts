@@ -1,8 +1,93 @@
 import Bynder from "@bynder/bynder-js-sdk";
 import { env } from "../env.server.js";
+import {
+	MAX_BYNDER_JSON_BYTES,
+	readResponseBody,
+} from "../http/body-limits.js";
 import { recordApiCall, recordRateLimitHit } from "../metrics/collector.js";
 import { getRateLimiter } from "./rate-limiter.js";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
+
+const BYNDER_REQUEST_TIMEOUT_MS = 60 * 1000;
+
+/** Highest page getAllMediaItems will request before giving up. */
+export const MAX_BYNDER_PAGES = 40;
+
+/** Most assets getAllMediaItems will collect for one query. */
+export const MAX_BYNDER_ASSETS = 1000;
+
+const MEDIA_PAGE_SIZE = 50;
+
+type BynderQueryValue = string | number | boolean | string[] | undefined;
+
+interface BynderMediaItem {
+	id: string;
+	tags?: string[];
+	version?: number;
+	[key: string]: unknown;
+}
+
+interface BynderMediaPage {
+	items: BynderMediaItem[];
+	pageLength: number;
+	total?: number;
+}
+
+export class BynderApiError extends Error {
+	readonly status: number;
+	readonly body: string;
+
+	constructor(status: number, statusText: string, body: string) {
+		super(
+			`Bynder API error: HTTP ${status} ${statusText}${body ? ` - ${body.slice(0, 500)}` : ""}`
+		);
+		this.name = "BynderApiError";
+		this.status = status;
+		this.body = body;
+	}
+}
+
+/** Mirrors the SDK: 2xx bodies other than 200-202 resolve to an empty object. */
+function parseBynderJson(status: number, text: string): unknown {
+	if (status > 202 || !text) {
+		return {};
+	}
+	try {
+		return JSON.parse(text);
+	} catch {
+		return text;
+	}
+}
+
+function isMediaItem(item: unknown): item is BynderMediaItem {
+	return (
+		item !== null &&
+		typeof item === "object" &&
+		"id" in item &&
+		typeof (item as { id: unknown }).id === "string"
+	);
+}
+
+/** Accepts both the raw-array and the `{ media, total }` list formats. */
+function parseMediaPage(response: unknown): BynderMediaPage | null {
+	if (Array.isArray(response)) {
+		return { items: response.filter(isMediaItem), pageLength: response.length };
+	}
+	if (
+		response &&
+		typeof response === "object" &&
+		"media" in response &&
+		Array.isArray((response as { media: unknown[] }).media)
+	) {
+		const { media, total } = response as { media: unknown[]; total?: number };
+		return {
+			items: media.filter(isMediaItem),
+			pageLength: media.length,
+			total: total || media.length,
+		};
+	}
+	return null;
+}
 
 export interface BynderPermanentTokenConfig {
 	baseURL: string;
@@ -179,9 +264,8 @@ export class BynderClient {
 			}
 		}
 
-		// Remove shopId and syncJobId from params before calling SDK
-		const { shopId: _shopId, syncJobId: _syncJobId, ...sdkParams } = params;
-		return this.bynder.getMediaList(sdkParams);
+		const { shopId: _shopId, syncJobId: _syncJobId, ...query } = params;
+		return this.getJson("v4/media/", { ...query, count: false });
 	}
 
 	/**
@@ -209,9 +293,73 @@ export class BynderClient {
 			}
 		}
 
-		// Remove shopId and syncJobId from params before calling SDK
-		const { shopId: _shopId, syncJobId: _syncJobId, ...sdkParams } = params;
-		return this.bynder.getMediaInfo(sdkParams);
+		return this.getJson(`v4/media/${encodeURIComponent(params.id)}/`);
+	}
+
+	/**
+	 * GET a Bynder API path with the permanent token and return the parsed
+	 * JSON body. Replaces the SDK's request helper, whose axios call has no
+	 * response size limit or timeout, for a portal host that a shop configures.
+	 */
+	private async getJson(
+		path: string,
+		query: Record<string, BynderQueryValue> = {}
+	): Promise<unknown> {
+		const controller = new AbortController();
+		const timeoutId = setTimeout(
+			() => controller.abort(),
+			BYNDER_REQUEST_TIMEOUT_MS
+		);
+		try {
+			const response = await fetch(this.buildApiUrl(path, query), {
+				headers: this.buildAuthHeaders(),
+				signal: controller.signal,
+			});
+			const text = (
+				await readResponseBody(response, MAX_BYNDER_JSON_BYTES)
+			).toString("utf8");
+			if (!response.ok) {
+				throw new BynderApiError(response.status, response.statusText, text);
+			}
+			return parseBynderJson(response.status, text);
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				throw new Error(
+					`Bynder API request timed out after ${BYNDER_REQUEST_TIMEOUT_MS} ms: ${path}`
+				);
+			}
+			throw error;
+		} finally {
+			clearTimeout(timeoutId);
+		}
+	}
+
+	private buildApiUrl(
+		path: string,
+		query: Record<string, BynderQueryValue>
+	): string {
+		const url = new URL(`${this.config.baseURL.replace(/\/+$/, "")}/${path}`);
+		for (const [key, value] of Object.entries(query)) {
+			if (value === undefined) {
+				continue;
+			}
+			for (const item of Array.isArray(value) ? value : [value]) {
+				url.searchParams.append(key, String(item));
+			}
+		}
+		return url.toString();
+	}
+
+	private buildAuthHeaders(): Record<string, string> {
+		if (!("permanentToken" in this.config) || !this.config.permanentToken) {
+			throw new Error(
+				"Bynder API reads require a permanent token client (createFromEnv)"
+			);
+		}
+		return {
+			Accept: "application/json",
+			Authorization: `Bearer ${this.config.permanentToken}`,
+		};
 	}
 
 	/**
@@ -273,7 +421,9 @@ export class BynderClient {
 
 	/**
 	 * Get all media items (paginated)
-	 * Handles pagination automatically
+	 * Handles pagination automatically. Stops with an error once the query
+	 * passes MAX_BYNDER_PAGES pages or MAX_BYNDER_ASSETS assets, so a portal
+	 * that keeps returning full pages cannot grow the result without bound.
 	 */
 	async getAllMediaItems(params: {
 		type?: string;
@@ -281,32 +431,15 @@ export class BynderClient {
 		keyword?: string;
 		shopId?: string; // Optional shopId for metrics tracking
 		syncJobId?: string; // Optional syncJobId for metrics tracking
-	}): Promise<
-		Array<{
-			id: string;
-			tags?: string[];
-			version?: number;
-			[key: string]: unknown;
-		}>
-	> {
-		// Use getMediaList with pagination
-		const allItems: Array<{
-			id: string;
-			tags?: string[];
-			version?: number;
-			[key: string]: unknown;
-		}> = [];
-		let page = 1;
-		const limit = 50;
-		let hasMore = true;
-		let total = 0;
+	}): Promise<BynderMediaItem[]> {
+		const allItems: BynderMediaItem[] = [];
+		const { shopId, syncJobId, ...listParams } = params;
 
-		while (hasMore) {
-			const { shopId, syncJobId, ...listParams } = params;
+		for (let page = 1; ; page++) {
 			const listCallParams: Parameters<BynderClient["getMediaList"]>[0] = {
 				...listParams,
 				page,
-				limit,
+				limit: MEDIA_PAGE_SIZE,
 			};
 			if (shopId) {
 				listCallParams.shopId = shopId;
@@ -314,63 +447,31 @@ export class BynderClient {
 			if (syncJobId) {
 				listCallParams.syncJobId = syncJobId;
 			}
-			const response = await this.getMediaList(listCallParams);
+			const mediaPage = parseMediaPage(await this.getMediaList(listCallParams));
+			if (!mediaPage) {
+				return allItems;
+			}
 
-			if (response && typeof response === "object") {
-				// Check if response has media array
-				if (
-					"media" in response &&
-					Array.isArray((response as { media: unknown[] }).media)
-				) {
-					const mediaList = (response as { media: unknown[]; total?: number })
-						.media;
-					// Type guard: ensure items have id property
-					const validItems = mediaList.filter(
-						(
-							item
-						): item is {
-							id: string;
-							tags?: string[];
-							version?: number;
-							[key: string]: unknown;
-						} =>
-							item !== null &&
-							typeof item === "object" &&
-							"id" in item &&
-							typeof (item as { id: unknown }).id === "string"
-					);
-					allItems.push(...validItems);
-					total = (response as { total?: number }).total || mediaList.length;
-					hasMore = allItems.length < total && mediaList.length === limit;
-					page++;
-				} else if (Array.isArray(response)) {
-					// Response is directly an array
-					// Type guard: ensure items have id property
-					const validItems = response.filter(
-						(
-							item
-						): item is {
-							id: string;
-							tags?: string[];
-							version?: number;
-							[key: string]: unknown;
-						} =>
-							item !== null &&
-							typeof item === "object" &&
-							"id" in item &&
-							typeof (item as { id: unknown }).id === "string"
-					);
-					allItems.push(...validItems);
-					hasMore = response.length === limit;
-					page++;
-				} else {
-					hasMore = false;
-				}
-			} else {
-				hasMore = false;
+			allItems.push(...mediaPage.items);
+			if (allItems.length > MAX_BYNDER_ASSETS) {
+				throw new Error(
+					`Bynder media query returned more than the maximum asset count of ${MAX_BYNDER_ASSETS}`
+				);
+			}
+
+			const isFullPage = mediaPage.pageLength === MEDIA_PAGE_SIZE;
+			const hasMore =
+				mediaPage.total === undefined
+					? isFullPage
+					: allItems.length < mediaPage.total && isFullPage;
+			if (!hasMore) {
+				return allItems;
+			}
+			if (page >= MAX_BYNDER_PAGES) {
+				throw new Error(
+					`Bynder media query reached the maximum page count of ${MAX_BYNDER_PAGES}`
+				);
 			}
 		}
-
-		return allItems;
 	}
 }

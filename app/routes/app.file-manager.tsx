@@ -9,6 +9,11 @@ import {
 } from "react-router";
 import prisma from "../db.server.js";
 import {
+	MAX_REQUEST_BODY_BYTES,
+	readRequestFormData,
+	rejectOversizedBody,
+} from "../lib/http/body-limits.js";
+import {
 	extractBynderTags,
 	filterFiles,
 	getShopifyFiles,
@@ -72,7 +77,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
 	const { admin } = await authenticate.admin(request);
-	const formData = await request.formData();
+	const formData = await readRequestFormData(
+		request,
+		MAX_REQUEST_BODY_BYTES
+	).catch(rejectOversizedBody);
 	const intent = formData.get("intent");
 
 	if (intent === "delete") {

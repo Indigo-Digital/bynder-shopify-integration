@@ -1,0 +1,2 @@
+export const MAX_BYNDER_PAGE_LIMIT = 50;
+export const MAX_BYNDER_RESPONSE_BYTES = 1024 * 1024;

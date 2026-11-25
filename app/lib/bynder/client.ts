@@ -1,8 +1,51 @@
+import { createRequire } from "node:module";
 import Bynder from "@bynder/bynder-js-sdk";
 import { env } from "../env.server.js";
 import { recordApiCall, recordRateLimitHit } from "../metrics/collector.js";
+import { MAX_BYNDER_PAGE_LIMIT, MAX_BYNDER_RESPONSE_BYTES } from "./limits.js";
+import { parseBynderPortalUrl } from "./portal-url.js";
 import { getRateLimiter } from "./rate-limiter.js";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
+
+/**
+ * The SDK sends every request through its own copy of axios and exposes no
+ * transport options, and axios buffers unbounded bodies by default. Capping
+ * that copy's defaults makes axios abort the socket once a response exceeds
+ * the limit instead of holding it in memory.
+ */
+function capBynderSdkResponseSize(): void {
+	const requireFromApp = createRequire(import.meta.url);
+	const requireFromSdk = createRequire(
+		requireFromApp.resolve("@bynder/bynder-js-sdk")
+	);
+	const sdkAxios = requireFromSdk("axios") as {
+		defaults: { maxContentLength: number };
+	};
+	sdkAxios.defaults.maxContentLength = MAX_BYNDER_RESPONSE_BYTES;
+}
+
+capBynderSdkResponseSize();
+
+function assertPageLimit(limit: number | undefined): void {
+	if (limit === undefined) {
+		return;
+	}
+	if (!Number.isInteger(limit) || limit < 1 || limit > MAX_BYNDER_PAGE_LIMIT) {
+		throw new RangeError(
+			`Bynder page limit must be an integer from 1 to ${MAX_BYNDER_PAGE_LIMIT}`
+		);
+	}
+}
+
+/**
+ * Re-serializes the validated URL so the SDK receives exactly the host that
+ * was checked, rather than a raw string another URL parser may read
+ * differently.
+ */
+function toCanonicalBaseURL(baseURL: string): string {
+	const url = parseBynderPortalUrl(baseURL);
+	return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
 
 export interface BynderPermanentTokenConfig {
 	baseURL: string;
@@ -15,8 +58,11 @@ export class BynderClient {
 	private bynder: Bynder;
 	public config: BynderConfig | BynderPermanentTokenConfig;
 
+	/**
+	 * @throws {InvalidBynderPortalUrlError} When baseURL is not a Bynder portal
+	 */
 	constructor(config: BynderConfig | BynderPermanentTokenConfig) {
-		this.config = config;
+		this.config = { ...config, baseURL: toCanonicalBaseURL(config.baseURL) };
 		const bynderConfig: {
 			baseURL: string;
 			clientId: string;
@@ -25,7 +71,7 @@ export class BynderClient {
 			permanentToken?: string;
 			token?: string;
 		} = {
-			baseURL: config.baseURL,
+			baseURL: this.config.baseURL,
 			clientId: config.clientId,
 			clientSecret: config.clientSecret,
 		};
@@ -163,6 +209,7 @@ export class BynderClient {
 		shopId?: string; // Optional shopId for metrics tracking
 		syncJobId?: string; // Optional syncJobId for metrics tracking
 	}) {
+		assertPageLimit(params.limit);
 		const rateLimiter = getRateLimiter();
 		const wasRateLimited = rateLimiter.getAvailableTokens() < 1;
 		await rateLimiter.acquire();
@@ -297,7 +344,7 @@ export class BynderClient {
 			[key: string]: unknown;
 		}> = [];
 		let page = 1;
-		const limit = 50;
+		const limit = MAX_BYNDER_PAGE_LIMIT;
 		let hasMore = true;
 		let total = 0;
 

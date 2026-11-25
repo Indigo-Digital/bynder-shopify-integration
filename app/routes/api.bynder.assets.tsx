@@ -1,8 +1,12 @@
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
+import { MAX_BYNDER_PAGE_LIMIT } from "../lib/bynder/limits.js";
+import { InvalidBynderPortalUrlError } from "../lib/bynder/portal-url.js";
 import type { BynderAsset } from "../lib/bynder/types.js";
 import { authenticate } from "../shopify.server.js";
+
+const DEFAULT_PAGE_LIMIT = 24;
 
 interface AssetsResponse {
 	assets: BynderAsset[];
@@ -13,13 +17,32 @@ interface AssetsResponse {
 }
 
 /**
+ * Parses a positive decimal integer query value, returning the fallback when
+ * the parameter is absent and null when it is malformed or above max.
+ */
+function parsePositiveIntParam(
+	rawValue: string | null,
+	fallback: number,
+	max: number = Number.MAX_SAFE_INTEGER
+): number | null {
+	if (rawValue === null) {
+		return fallback;
+	}
+	if (!/^\d+$/.test(rawValue)) {
+		return null;
+	}
+	const value = Number(rawValue);
+	return value >= 1 && value <= max ? value : null;
+}
+
+/**
  * GET /api/bynder/assets - Fetch assets from Bynder with search/filter support
  * Query parameters:
  * - keyword: Search keyword
  * - tags: Comma-separated tags to filter by
  * - type: Asset type filter (image, video, document, etc.)
  * - page: Page number (default: 1)
- * - limit: Results per page (default: 24)
+ * - limit: Results per page (default: 24, max: 50)
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
 	const { session } = await authenticate.admin(request);
@@ -39,9 +62,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		);
 	}
 
+	const url = new URL(request.url);
+	const page = parsePositiveIntParam(url.searchParams.get("page"), 1);
+	const limit = parsePositiveIntParam(
+		url.searchParams.get("limit"),
+		DEFAULT_PAGE_LIMIT,
+		MAX_BYNDER_PAGE_LIMIT
+	);
+	if (page === null || limit === null) {
+		return Response.json(
+			{
+				error: `page must be a positive integer and limit an integer from 1 to ${MAX_BYNDER_PAGE_LIMIT}`,
+			},
+			{ status: 400 }
+		);
+	}
+
 	try {
-		// Parse query parameters
-		const url = new URL(request.url);
 		const keyword = url.searchParams.get("keyword") || undefined;
 		const tagsParam = url.searchParams.get("tags");
 		const tags = tagsParam
@@ -51,8 +88,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 					.filter(Boolean)
 			: undefined;
 		const type = url.searchParams.get("type") || undefined;
-		const page = parseInt(url.searchParams.get("page") || "1", 10);
-		const limit = parseInt(url.searchParams.get("limit") || "24", 10);
 
 		// Create Bynder client
 		const bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
@@ -114,6 +149,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 		return Response.json(result);
 	} catch (error) {
+		if (error instanceof InvalidBynderPortalUrlError) {
+			return Response.json({ error: error.message }, { status: 400 });
+		}
 		console.error("Error fetching Bynder assets:", error);
 		let errorMessage = "Failed to fetch assets from Bynder";
 		if (error instanceof Error) {

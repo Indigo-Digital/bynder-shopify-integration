@@ -206,7 +206,7 @@ describe("app.settings action", () => {
 	it("should update Bynder base URL", async () => {
 		const formData = new FormData();
 		formData.append("intent", "update_bynder_url");
-		formData.append("bynderBaseUrl", "https://test.bynder.com/api");
+		formData.append("bynderBaseUrl", "https://test.getbynder.com/api");
 
 		const request = new Request("http://localhost/app/settings", {
 			method: "POST",
@@ -219,10 +219,10 @@ describe("app.settings action", () => {
 			where: { shop: "test-shop.myshopify.com" },
 			create: {
 				shop: "test-shop.myshopify.com",
-				bynderBaseUrl: "https://test.bynder.com/api",
+				bynderBaseUrl: "https://test.getbynder.com/api",
 			},
 			update: {
-				bynderBaseUrl: "https://test.bynder.com/api",
+				bynderBaseUrl: "https://test.getbynder.com/api",
 			},
 		});
 

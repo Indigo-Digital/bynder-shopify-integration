@@ -11,9 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      # pnpm/action-setup v4.3.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
-          version: latest
+          version: 10.33.4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -29,9 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      # pnpm/action-setup v4.3.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
-          version: latest
+          version: 10.33.4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -47,9 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      # pnpm/action-setup v4.3.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
-          version: latest
+          version: 10.33.4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -66,9 +69,10 @@ jobs:
     needs: [lint-and-format, type-check]
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      # pnpm/action-setup v4.3.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
-          version: latest
+          version: 10.33.4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"

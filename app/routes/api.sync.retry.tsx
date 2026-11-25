@@ -1,8 +1,74 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
-import { retryFailedAssets } from "../lib/sync/retry-failed-assets.js";
+import {
+	BodyTooLargeError,
+	readLimitedBody,
+} from "../lib/http/read-limited-body.js";
+import {
+	RetryRequestError,
+	retryFailedAssets,
+} from "../lib/sync/retry-failed-assets.js";
 import { authenticate } from "../shopify.server.js";
+
+const MAX_RETRY_BODY_BYTES = 16 * 1024;
+
+interface RetryRequestBody {
+	jobId?: string;
+	assetIds?: string[];
+	onlyTransient?: boolean;
+}
+
+function toRetryRequestBody(raw: {
+	jobId?: unknown;
+	assetIds?: unknown;
+	onlyTransient?: unknown;
+}): RetryRequestBody {
+	const { jobId, assetIds, onlyTransient } = raw;
+	if (jobId !== undefined && typeof jobId !== "string") {
+		throw new TypeError("jobId must be a string");
+	}
+	if (
+		assetIds !== undefined &&
+		!(
+			Array.isArray(assetIds) &&
+			assetIds.every((id) => typeof id === "string" && id.length > 0)
+		)
+	) {
+		throw new TypeError("assetIds must be an array of non-empty strings");
+	}
+	return {
+		...(jobId && { jobId }),
+		...(assetIds && { assetIds }),
+		onlyTransient: onlyTransient === true,
+	};
+}
+
+/**
+ * @throws {BodyTooLargeError} Before parsing, when the body exceeds MAX_RETRY_BODY_BYTES
+ */
+async function parseRetryBody(request: Request): Promise<RetryRequestBody> {
+	const contentType = request.headers.get("content-type") ?? "";
+	const bytes = await readLimitedBody(request, MAX_RETRY_BODY_BYTES);
+
+	if (contentType.includes("application/json")) {
+		const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+		if (typeof parsed !== "object" || parsed === null) {
+			throw new TypeError("Body must be a JSON object");
+		}
+		return toRetryRequestBody(parsed);
+	}
+
+	const formData = await new Response(bytes, {
+		headers: { "content-type": contentType },
+	}).formData();
+	const assetIdsValue = formData.get("assetIds")?.toString();
+	return toRetryRequestBody({
+		jobId: formData.get("jobId")?.toString() || undefined,
+		assetIds: assetIdsValue ? JSON.parse(assetIdsValue) : undefined,
+		onlyTransient: formData.get("onlyTransient") === "true",
+	});
+}
 
 /**
  * Retry failed assets endpoint
@@ -30,31 +96,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			);
 		}
 
-		// Parse request body
-		let body: {
-			jobId?: string;
-			assetIds?: string[];
-			onlyTransient?: boolean;
-		} = {};
-
+		let body: RetryRequestBody;
 		try {
-			const contentType = request.headers.get("content-type");
-			if (contentType?.includes("application/json")) {
-				body = await request.json();
-			} else {
-				// Handle form data
-				const formData = await request.formData();
-				const jobIdValue = formData.get("jobId")?.toString();
-				const assetIdsValue = formData.get("assetIds")?.toString();
-				body = {
-					...(jobIdValue && { jobId: jobIdValue }),
-					...(assetIdsValue && {
-						assetIds: JSON.parse(assetIdsValue) as string[],
-					}),
-					onlyTransient: formData.get("onlyTransient") === "true",
-				};
+			body = await parseRetryBody(request);
+		} catch (error) {
+			if (error instanceof BodyTooLargeError) {
+				return Response.json({ error: error.message }, { status: 413 });
 			}
-		} catch (_error) {
 			return Response.json({ error: "Invalid request body" }, { status: 400 });
 		}
 
@@ -115,6 +163,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			message: `Retry completed: ${result.successful} successful, ${result.failed} failed, ${result.skipped} skipped`,
 		});
 	} catch (error) {
+		if (error instanceof RetryRequestError) {
+			return Response.json({ error: error.message }, { status: error.status });
+		}
 		console.error("Retry error:", error);
 		return Response.json(
 			{

@@ -4,6 +4,13 @@ import { recordApiCall, recordRateLimitHit } from "../metrics/collector.js";
 import { getRateLimiter } from "./rate-limiter.js";
 import type { BynderConfig, BynderOAuthTokens } from "./types.js";
 
+/**
+ * Hard ceiling on media-list requests per getAllMediaItems call, so a single
+ * scan cannot monopolize the shared rate limiter if Bynder keeps reporting
+ * more results.
+ */
+export const MAX_MEDIA_LIST_PAGES = 20;
+
 export interface BynderPermanentTokenConfig {
 	baseURL: string;
 	permanentToken: string;
@@ -273,7 +280,8 @@ export class BynderClient {
 
 	/**
 	 * Get all media items (paginated)
-	 * Handles pagination automatically
+	 * Handles pagination automatically, stopping after MAX_MEDIA_LIST_PAGES
+	 * pages.
 	 */
 	async getAllMediaItems(params: {
 		type?: string;
@@ -302,6 +310,12 @@ export class BynderClient {
 		let total = 0;
 
 		while (hasMore) {
+			if (page > MAX_MEDIA_LIST_PAGES) {
+				console.warn(
+					`[Bynder] Stopped media scan after ${MAX_MEDIA_LIST_PAGES} pages (${allItems.length} items); remaining results were not fetched`
+				);
+				break;
+			}
 			const { shopId, syncJobId, ...listParams } = params;
 			const listCallParams: Parameters<BynderClient["getMediaList"]>[0] = {
 				...listParams,

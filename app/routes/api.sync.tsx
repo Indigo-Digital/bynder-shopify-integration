@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
 import { uploadBynderAsset } from "../lib/shopify/files.js";
+import { enqueueFullSync } from "../lib/sync/full-sync-queue.js";
 import { authenticate } from "../shopify.server.js";
 
 /**
@@ -187,17 +188,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			return Response.json({ success: true, fileId, fileUrl });
 		} else {
 			// Sync all assets - create background job and return immediately
-			const syncJob = await prisma.syncJob.create({
-				data: {
-					shopId: shopConfig.id,
-					status: "pending",
-					assetsProcessed: 0,
-				},
-			});
+			const result = await enqueueFullSync(shopConfig.id);
+
+			if (result.outcome === "active") {
+				return Response.json(
+					{
+						error:
+							"A sync is already queued or running for this shop. Wait for it to finish or cancel it first.",
+						jobId: result.jobId,
+					},
+					{ status: 409 }
+				);
+			}
+
+			if (result.outcome === "throttled") {
+				const minutes = Math.ceil(result.retryAfterSeconds / 60);
+				return Response.json(
+					{
+						error: `A full sync was started recently. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+					},
+					{
+						status: 429,
+						headers: { "Retry-After": String(result.retryAfterSeconds) },
+					}
+				);
+			}
 
 			return Response.json({
 				success: true,
-				jobId: syncJob.id,
+				jobId: result.jobId,
 				message: "Sync job created. Processing in background.",
 			});
 		}

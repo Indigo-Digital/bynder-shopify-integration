@@ -6,14 +6,20 @@ vi.mock("../../db.server.js", () => {
 	const mockPrisma = {
 		shop: {
 			findUnique: vi.fn(),
+			update: vi.fn(),
 		},
 		syncedAsset: {
 			upsert: vi.fn(),
 		},
 		syncJob: {
 			create: vi.fn(),
+			findFirst: vi.fn(),
 		},
+		$transaction: vi.fn(),
 	};
+	mockPrisma.$transaction.mockImplementation(
+		(fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma)
+	);
 	return {
 		default: mockPrisma,
 	};
@@ -54,6 +60,7 @@ const mockPrisma = prisma as unknown as {
 	};
 	syncJob: {
 		create: ReturnType<typeof vi.fn>;
+		findFirst: ReturnType<typeof vi.fn>;
 	};
 };
 
@@ -99,6 +106,7 @@ describe("api.sync", () => {
 			status: "pending",
 		};
 
+		mockPrisma.syncJob.findFirst.mockResolvedValue(null);
 		mockPrisma.syncJob.create.mockResolvedValue(mockJob);
 
 		const request = new Request("http://localhost/api/sync", {
@@ -118,6 +126,7 @@ describe("api.sync", () => {
 				status: "pending",
 				assetsProcessed: 0,
 			},
+			select: { id: true },
 		});
 		expect(syncBynderAssets).not.toHaveBeenCalled();
 	});
@@ -203,6 +212,7 @@ describe("api.sync", () => {
 	});
 
 	it("should handle sync errors gracefully", async () => {
+		mockPrisma.syncJob.findFirst.mockResolvedValue(null);
 		mockPrisma.syncJob.create.mockRejectedValue(new Error("Database error"));
 
 		const request = new Request("http://localhost/api/sync", {

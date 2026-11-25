@@ -160,7 +160,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const isActivating = formData.get("active") === "true";
 
 		try {
-			const bynderClient = BynderClient.createFromEnv(shopConfig.bynderBaseUrl);
+			const bynderClient = BynderClient.createFromEnv(
+				shopConfig.bynderBaseUrl,
+				shopConfig.shop
+			);
 			const webhookUrl = `${env.SHOPIFY_APP_URL}/api/bynder/webhooks`;
 			const eventTypesInput = formData.get("eventTypes")?.toString() || "";
 			const eventTypes =

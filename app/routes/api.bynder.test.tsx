@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
+import { InvalidBynderPortalUrlError } from "../lib/bynder/portal-url.js";
 import { authenticate } from "../shopify.server.js";
 
 /**
@@ -48,6 +49,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 			testResponse: testResponse ? "Received response" : "No response",
 		});
 	} catch (error) {
+		if (error instanceof InvalidBynderPortalUrlError) {
+			return Response.json(
+				{
+					connected: false,
+					baseURL: shopConfig.bynderBaseUrl,
+					error: error.message,
+				},
+				{ status: 400 }
+			);
+		}
+
 		// Provide more detailed error information
 		let errorMessage = "Connection test failed";
 		let errorDetails = "";

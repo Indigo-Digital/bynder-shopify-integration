@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import axios from "axios";
 import type { BynderClient } from "./client.js";
+import { MAX_BYNDER_RESPONSE_BYTES } from "./limits.js";
 
 export interface WebhookSubscription {
 	id: string;
@@ -48,6 +49,7 @@ export async function createWebhookSubscription(
 			events,
 		},
 		{
+			maxContentLength: MAX_BYNDER_RESPONSE_BYTES,
 			headers: {
 				Authorization: `Bearer ${permanentToken}`,
 				"Content-Type": "application/json",
@@ -91,6 +93,7 @@ export async function updateWebhookSubscription(
 			events,
 		},
 		{
+			maxContentLength: MAX_BYNDER_RESPONSE_BYTES,
 			headers: {
 				Authorization: `Bearer ${permanentToken}`,
 				"Content-Type": "application/json",
@@ -126,6 +129,7 @@ export async function deleteWebhookSubscription(
 	}
 
 	await axios.delete(endpoint, {
+		maxContentLength: MAX_BYNDER_RESPONSE_BYTES,
 		headers: {
 			Authorization: `Bearer ${permanentToken}`,
 		},
@@ -157,6 +161,7 @@ export async function getWebhookSubscription(
 	}
 
 	const response = await axios.get(endpoint, {
+		maxContentLength: MAX_BYNDER_RESPONSE_BYTES,
 		headers: {
 			Authorization: `Bearer ${permanentToken}`,
 		},

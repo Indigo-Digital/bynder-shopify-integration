@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server.js";
+import { cancelActiveJob } from "../lib/sync/job-status.js";
 import { authenticate } from "../shopify.server.js";
 
 /**
@@ -64,14 +65,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			);
 		}
 
-		// Update job status to cancelled
-		await prisma.syncJob.update({
-			where: { id: jobId },
-			data: {
-				status: "cancelled",
-				completedAt: new Date(),
-			},
-		});
+		if (!(await cancelActiveJob(jobId, shopConfig.id))) {
+			return Response.json(
+				{ error: "Cannot cancel job: it is no longer pending or running" },
+				{ status: 409 }
+			);
+		}
 
 		return Response.json({
 			success: true,

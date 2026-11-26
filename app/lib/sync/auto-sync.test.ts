@@ -22,6 +22,7 @@ vi.mock("../../db.server.js", () => {
 		syncJob: {
 			create: vi.fn(),
 			update: vi.fn(),
+			updateMany: vi.fn(),
 			findMany: vi.fn(),
 			findUnique: vi.fn(),
 		},
@@ -53,6 +54,7 @@ const mockPrisma = prisma as unknown as {
 	syncJob: {
 		create: ReturnType<typeof vi.fn>;
 		update: ReturnType<typeof vi.fn>;
+		updateMany: ReturnType<typeof vi.fn>;
 		findMany: ReturnType<typeof vi.fn>;
 		findUnique: ReturnType<typeof vi.fn>;
 	};
@@ -98,6 +100,7 @@ describe("syncBynderAssets", () => {
 			shopId: "shop-123",
 			status: "running",
 		});
+		mockPrisma.syncJob.updateMany.mockResolvedValue({ count: 1 });
 	});
 
 	it("should sync assets with matching tags", async () => {
@@ -342,8 +345,8 @@ describe("syncBynderAssets", () => {
 			jobId: "job-123",
 		});
 
-		expect(mockPrisma.syncJob.update).toHaveBeenCalledWith({
-			where: { id: "job-123" },
+		expect(mockPrisma.syncJob.updateMany).toHaveBeenCalledWith({
+			where: { id: "job-123", status: "pending" },
 			data: {
 				status: "running",
 				startedAt: expect.any(Date),

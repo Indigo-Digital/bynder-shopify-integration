@@ -14,6 +14,7 @@ export interface RetryOptions {
 	jobId?: string; // If provided, retry all failed assets from this job
 	assetIds?: string[]; // If provided, retry only these specific assets
 	onlyTransient?: boolean; // If true, only retry transient errors (default: false for manual retries)
+	isCancelled?: () => Promise<boolean>; // Checked before each asset; retrying stops once it resolves true
 }
 
 export interface RetryResult {
@@ -185,6 +186,12 @@ export async function retryFailedAssets(
 	let skipped = 0;
 
 	for (const asset of assetsToRetry) {
+		if (await options.isCancelled?.()) {
+			console.log(
+				`[Retry] Job ${options.jobId} was cancelled, stopping retry before asset ${asset.assetId}`
+			);
+			break;
+		}
 		try {
 			const result = await syncSingleBynderAsset({
 				shopId,
@@ -250,7 +257,7 @@ export async function retryFailedAssets(
 		}));
 
 	return {
-		processed: assetsToRetry.length,
+		processed: results.length,
 		successful,
 		failed,
 		skipped,

@@ -10,6 +10,7 @@ import {
 import { uploadBynderAsset } from "../shopify/files.js";
 import type { AdminApi } from "../types.js";
 import { categorizeErrors } from "./error-categorization.js";
+import { claimPendingJob, finishRunningJob } from "./job-status.js";
 import { retryFailedAssets } from "./retry-failed-assets.js";
 
 interface SyncOptions {
@@ -60,15 +61,14 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		if (!syncJob) {
 			throw new Error(`Job ${options.jobId} not found`);
 		}
-		// Update status to running if it was pending
-		if (syncJob.status === "pending") {
-			await prisma.syncJob.update({
-				where: { id: options.jobId },
-				data: {
-					status: "running",
-					startedAt: new Date(),
-				},
-			});
+		const isRunnable =
+			syncJob.status === "running" ||
+			(syncJob.status === "pending" && (await claimPendingJob(syncJob.id)));
+		if (!isRunnable) {
+			console.log(
+				`[Sync Job ${syncJob.id}] Job is no longer pending or running, skipping`
+			);
+			return { processed: 0, created: 0, updated: 0, errors: [] };
 		}
 	} else {
 		// Create sync job (backward compatibility for direct calls)
@@ -420,6 +420,7 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 						bynderClient,
 						jobId: syncJob.id,
 						onlyTransient: true, // Only retry transient errors automatically
+						isCancelled: checkCancellation,
 					});
 
 					console.log(
@@ -496,17 +497,19 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		// Try to update with new fields first (after migration)
 		// If migration hasn't been applied, fall back to basic update
 		try {
-			await prisma.syncJob.update({
-				where: { id: syncJob.id },
-				data: {
-					status: "completed",
-					completedAt: new Date(),
-					assetsProcessed: allAssets.length,
-					assetsCreated: created,
-					assetsUpdated: updated,
-					errors: errors.length > 0 ? JSON.stringify(errors) : null,
-				},
+			const isCompleted = await finishRunningJob(syncJob.id, {
+				status: "completed",
+				completedAt: new Date(),
+				assetsProcessed: allAssets.length,
+				assetsCreated: created,
+				assetsUpdated: updated,
+				errors: errors.length > 0 ? JSON.stringify(errors) : null,
 			});
+			if (!isCompleted) {
+				console.log(
+					`[Sync Job ${syncJob.id}] Job left the running state before completion, keeping its status`
+				);
+			}
 		} catch (error) {
 			// If migration hasn't been run yet, try to apply it automatically
 			if (
@@ -577,14 +580,15 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 								"assetsCreated" = $4,
 								"assetsUpdated" = $5,
 								errors = $6
-							WHERE id = $7`,
+							WHERE id = $7 AND status = $8`,
 							"completed",
 							new Date(),
 							allAssets.length,
 							created,
 							updated,
 							errors.length > 0 ? JSON.stringify(errors) : null,
-							syncJob.id
+							syncJob.id,
+							"running"
 						);
 					} else {
 						// SQLite: Use parameterized query
@@ -596,14 +600,15 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 								assetsCreated = ?,
 								assetsUpdated = ?,
 								errors = ?
-							WHERE id = ?`,
+							WHERE id = ? AND status = ?`,
 							"completed",
 							new Date(),
 							allAssets.length,
 							created,
 							updated,
 							errors.length > 0 ? JSON.stringify(errors) : null,
-							syncJob.id
+							syncJob.id,
+							"running"
 						);
 					}
 				} catch (migrationError) {
@@ -630,14 +635,11 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 								: `${errors.length} error${errors.length !== 1 ? "s" : ""}: ${errorDetails}`;
 					}
 
-					await prisma.syncJob.update({
-						where: { id: syncJob.id },
-						data: {
-							status: "completed",
-							completedAt: new Date(),
-							assetsProcessed: allAssets.length,
-							error: errorMessage,
-						},
+					await finishRunningJob(syncJob.id, {
+						status: "completed",
+						completedAt: new Date(),
+						assetsProcessed: allAssets.length,
+						error: errorMessage,
 					});
 				}
 			} else {
@@ -659,13 +661,10 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 			errorMessage,
 			error instanceof Error ? error.stack : undefined
 		);
-		await prisma.syncJob.update({
-			where: { id: syncJob.id },
-			data: {
-				status: "failed",
-				completedAt: new Date(),
-				error: errorMessage,
-			},
+		await finishRunningJob(syncJob.id, {
+			status: "failed",
+			completedAt: new Date(),
+			error: errorMessage,
 		});
 		throw error;
 	}

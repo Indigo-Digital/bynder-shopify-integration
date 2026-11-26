@@ -8,6 +8,7 @@ import prisma from "../../db.server.js";
 import { unauthenticated } from "../../shopify.server.js";
 import { BynderClient } from "../bynder/client.js";
 import { syncBynderAssets } from "./auto-sync.js";
+import { claimPendingJob, finishRunningJob } from "./job-status.js";
 
 console.log("[Worker] Imports loaded successfully");
 
@@ -125,15 +126,15 @@ async function processJobs() {
 
 			// Mark job as running (if it wasn't already)
 			if (pendingJob.status !== "running") {
-				await withPrismaRetry(() =>
-					prisma.syncJob.update({
-						where: { id: pendingJob.id },
-						data: {
-							status: "running",
-							startedAt: new Date(),
-						},
-					})
+				const isClaimed = await withPrismaRetry(() =>
+					claimPendingJob(pendingJob.id)
 				);
+				if (!isClaimed) {
+					console.log(
+						`[Worker] Job ${pendingJob.id} is no longer pending, skipping`
+					);
+					continue;
+				}
 			} else {
 				console.log(
 					`[Worker] Job ${pendingJob.id} was already running, resuming...`
@@ -181,13 +182,10 @@ async function processJobs() {
 
 				// Mark job as failed
 				await withPrismaRetry(() =>
-					prisma.syncJob.update({
-						where: { id: pendingJob.id },
-						data: {
-							status: "failed",
-							completedAt: new Date(),
-							error: errorMessage,
-						},
+					finishRunningJob(pendingJob.id, {
+						status: "failed",
+						completedAt: new Date(),
+						error: errorMessage,
 					})
 				).catch((updateError) => {
 					// Log but don't throw - we've already logged the original error

@@ -9,7 +9,7 @@ vi.mock("../../db.server.js", () => {
 		},
 		syncJob: {
 			findUnique: vi.fn(),
-			update: vi.fn(),
+			updateMany: vi.fn(),
 		},
 	};
 	return {
@@ -32,7 +32,7 @@ const mockPrisma = prisma as unknown as {
 	};
 	syncJob: {
 		findUnique: ReturnType<typeof vi.fn>;
-		update: ReturnType<typeof vi.fn>;
+		updateMany: ReturnType<typeof vi.fn>;
 	};
 };
 
@@ -67,10 +67,7 @@ describe("api.sync.cancel", () => {
 
 	it("should cancel a running job", async () => {
 		mockPrisma.syncJob.findUnique.mockResolvedValue(mockJob);
-		mockPrisma.syncJob.update.mockResolvedValue({
-			...mockJob,
-			status: "cancelled",
-		});
+		mockPrisma.syncJob.updateMany.mockResolvedValue({ count: 1 });
 
 		const request = new Request("http://localhost/api/sync/cancel", {
 			method: "POST",
@@ -83,8 +80,12 @@ describe("api.sync.cancel", () => {
 
 		expect(response.status).toBe(200);
 		expect(data.success).toBe(true);
-		expect(mockPrisma.syncJob.update).toHaveBeenCalledWith({
-			where: { id: "job-123" },
+		expect(mockPrisma.syncJob.updateMany).toHaveBeenCalledWith({
+			where: {
+				id: "job-123",
+				shopId: "shop-123",
+				status: { in: ["pending", "running"] },
+			},
 			data: {
 				status: "cancelled",
 				completedAt: expect.any(Date),
@@ -99,10 +100,7 @@ describe("api.sync.cancel", () => {
 		};
 
 		mockPrisma.syncJob.findUnique.mockResolvedValue(pendingJob);
-		mockPrisma.syncJob.update.mockResolvedValue({
-			...pendingJob,
-			status: "cancelled",
-		});
+		mockPrisma.syncJob.updateMany.mockResolvedValue({ count: 1 });
 
 		const request = new Request("http://localhost/api/sync/cancel", {
 			method: "POST",
@@ -136,7 +134,24 @@ describe("api.sync.cancel", () => {
 
 		expect(response.status).toBe(400);
 		expect(data.error).toContain("Cannot cancel job with status: completed");
-		expect(mockPrisma.syncJob.update).not.toHaveBeenCalled();
+		expect(mockPrisma.syncJob.updateMany).not.toHaveBeenCalled();
+	});
+
+	it("should not overwrite a job that finished after the status check", async () => {
+		mockPrisma.syncJob.findUnique.mockResolvedValue(mockJob);
+		mockPrisma.syncJob.updateMany.mockResolvedValue({ count: 0 });
+
+		const request = new Request("http://localhost/api/sync/cancel", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ jobId: "job-123" }),
+		});
+
+		const response = await action({ request } as unknown as ActionFunctionArgs);
+		const data = await response.json();
+
+		expect(response.status).toBe(409);
+		expect(data.error).toContain("no longer pending or running");
 	});
 
 	it("should reject cancelling job from different shop", async () => {

@@ -82,14 +82,15 @@ export async function syncBynderAssets(options: SyncOptions): Promise<{
 		});
 	}
 
-	// Helper function to check if job was cancelled
+	// A job that no longer exists was deleted with its shop (app uninstall or
+	// shop redact) and must stop rather than keep uploading.
 	const checkCancellation = async (): Promise<boolean> => {
 		if (!options.jobId) return false;
 		const job = await prisma.syncJob.findUnique({
 			where: { id: options.jobId },
 			select: { status: true },
 		});
-		return job?.status === "cancelled";
+		return !job || job.status === "cancelled";
 	};
 
 	let errors: Array<{ assetId: string; error: string }> = [];

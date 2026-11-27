@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import axios from "axios";
 import type { BynderClient } from "./client.js";
+import { parseHttpsPortalUrl } from "./portal-url.js";
 
 export interface WebhookSubscription {
 	id: string;
@@ -16,6 +17,70 @@ export interface CreateWebhookResponse {
 	active: boolean;
 }
 
+const SUBSCRIPTIONS_PATH = "/v7/webhooks/public/api/subscriptions";
+
+/**
+ * The portal address is chosen by shop staff and every shop shares this
+ * process, so each call has a hard deadline and a response size cap.
+ * axios' `timeout` stops applying once response headers arrive, so the
+ * per-request abort signal is what bounds a slowly dribbled body.
+ */
+export const PORTAL_REQUEST_TIMEOUT_MS = 3_000;
+export const PORTAL_MAX_RESPONSE_BYTES = 64 * 1024;
+
+const portalHttp = axios.create({
+	timeout: PORTAL_REQUEST_TIMEOUT_MS,
+	maxContentLength: PORTAL_MAX_RESPONSE_BYTES,
+	maxRedirects: 0,
+});
+
+interface PortalRequest {
+	method: "GET" | "POST" | "PUT" | "DELETE";
+	path: string;
+	data?: { url: string; events: string[] };
+}
+
+function resolvePortalEndpoint(bynderClient: BynderClient, path: string): URL {
+	const configuredBaseURL = bynderClient.config.baseURL;
+	const apiBaseURL = configuredBaseURL.endsWith("/api")
+		? configuredBaseURL
+		: `${configuredBaseURL.replace(/\/api$/, "")}/api`;
+	return parseHttpsPortalUrl(`${apiBaseURL}${path}`);
+}
+
+function getPermanentToken(bynderClient: BynderClient): string {
+	const permanentToken =
+		"permanentToken" in bynderClient.config
+			? bynderClient.config.permanentToken
+			: undefined;
+	if (!permanentToken) {
+		throw new Error("Permanent token is required for webhook operations");
+	}
+	return permanentToken;
+}
+
+async function sendPortalRequest<T>(
+	bynderClient: BynderClient,
+	request: PortalRequest
+): Promise<T> {
+	const endpoint = resolvePortalEndpoint(bynderClient, request.path);
+	const headers: Record<string, string> = {
+		Authorization: `Bearer ${getPermanentToken(bynderClient)}`,
+	};
+	if (request.data) {
+		headers["Content-Type"] = "application/json";
+	}
+
+	const response = await portalHttp.request<T>({
+		url: endpoint.href,
+		method: request.method,
+		data: request.data,
+		headers,
+		signal: AbortSignal.timeout(PORTAL_REQUEST_TIMEOUT_MS),
+	});
+	return response.data;
+}
+
 /**
  * Create a webhook subscription in Bynder
  * POST /api/v7/webhooks/public/api/subscriptions
@@ -25,37 +90,11 @@ export async function createWebhookSubscription(
 	url: string,
 	events: string[] = ["asset.tagged", "media.tagged"]
 ): Promise<CreateWebhookResponse> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
-
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions`;
-
-	// Get permanent token for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
-	if (!permanentToken) {
-		throw new Error("Permanent token is required for webhook operations");
-	}
-
-	const response = await axios.post(
-		endpoint,
-		{
-			url,
-			events,
-		},
-		{
-			headers: {
-				Authorization: `Bearer ${permanentToken}`,
-				"Content-Type": "application/json",
-			},
-		}
-	);
-
-	return response.data as CreateWebhookResponse;
+	return sendPortalRequest<CreateWebhookResponse>(bynderClient, {
+		method: "POST",
+		path: SUBSCRIPTIONS_PATH,
+		data: { url, events },
+	});
 }
 
 /**
@@ -68,37 +107,11 @@ export async function updateWebhookSubscription(
 	url: string,
 	events: string[] = ["asset.tagged", "media.tagged"]
 ): Promise<CreateWebhookResponse> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
-
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions/${id}`;
-
-	// Get permanent token for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
-	if (!permanentToken) {
-		throw new Error("Permanent token is required for webhook operations");
-	}
-
-	const response = await axios.put(
-		endpoint,
-		{
-			url,
-			events,
-		},
-		{
-			headers: {
-				Authorization: `Bearer ${permanentToken}`,
-				"Content-Type": "application/json",
-			},
-		}
-	);
-
-	return response.data as CreateWebhookResponse;
+	return sendPortalRequest<CreateWebhookResponse>(bynderClient, {
+		method: "PUT",
+		path: `${SUBSCRIPTIONS_PATH}/${id}`,
+		data: { url, events },
+	});
 }
 
 /**
@@ -109,26 +122,9 @@ export async function deleteWebhookSubscription(
 	bynderClient: BynderClient,
 	id: string
 ): Promise<void> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
-
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions/${id}`;
-
-	// Get permanent token for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
-	if (!permanentToken) {
-		throw new Error("Permanent token is required for webhook operations");
-	}
-
-	await axios.delete(endpoint, {
-		headers: {
-			Authorization: `Bearer ${permanentToken}`,
-		},
+	await sendPortalRequest<unknown>(bynderClient, {
+		method: "DELETE",
+		path: `${SUBSCRIPTIONS_PATH}/${id}`,
 	});
 }
 
@@ -140,29 +136,10 @@ export async function getWebhookSubscription(
 	bynderClient: BynderClient,
 	id: string
 ): Promise<CreateWebhookResponse> {
-	const baseURL = bynderClient.config.baseURL.endsWith("/api")
-		? bynderClient.config.baseURL
-		: `${bynderClient.config.baseURL.replace(/\/api$/, "")}/api`;
-
-	const endpoint = `${baseURL}/v7/webhooks/public/api/subscriptions/${id}`;
-
-	// Get permanent token for authentication
-	const permanentToken =
-		"permanentToken" in bynderClient.config
-			? bynderClient.config.permanentToken
-			: undefined;
-
-	if (!permanentToken) {
-		throw new Error("Permanent token is required for webhook operations");
-	}
-
-	const response = await axios.get(endpoint, {
-		headers: {
-			Authorization: `Bearer ${permanentToken}`,
-		},
+	return sendPortalRequest<CreateWebhookResponse>(bynderClient, {
+		method: "GET",
+		path: `${SUBSCRIPTIONS_PATH}/${id}`,
 	});
-
-	return response.data as CreateWebhookResponse;
 }
 
 /**

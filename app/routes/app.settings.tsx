@@ -5,6 +5,10 @@ import { redirect, useFetcher, useLoaderData } from "react-router";
 import { AssetBrowser } from "../components/AssetBrowser.js";
 import prisma from "../db.server.js";
 import {
+	InvalidPortalUrlError,
+	parseHttpsPortalUrl,
+} from "../lib/bynder/portal-url.js";
+import {
 	processFileFolderTemplate,
 	type TemplateContext,
 } from "../lib/shopify/file-template.js";
@@ -129,6 +133,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 		if (!bynderBaseUrl) {
 			return { error: "Bynder base URL is required" };
+		}
+
+		try {
+			parseHttpsPortalUrl(bynderBaseUrl);
+		} catch (error) {
+			if (error instanceof InvalidPortalUrlError) {
+				return { error: error.message };
+			}
+			throw error;
 		}
 
 		await prisma.shop.upsert({

@@ -1,9 +1,17 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useCallback, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { data, useFetcher, useLoaderData } from "react-router";
 import prisma from "../db.server.js";
 import { BynderClient } from "../lib/bynder/client.js";
+import {
+	InvalidPortalUrlError,
+	parseHttpsPortalUrl,
+} from "../lib/bynder/portal-url.js";
+import {
+	WebhookRegistrationLimitError,
+	webhookRegistrationLimiter,
+} from "../lib/bynder/webhook-registration-limiter.js";
 import {
 	createWebhookSubscription,
 	deleteWebhookSubscription,
@@ -156,6 +164,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			return { error: "Shop not configured" };
 		}
 
+		try {
+			parseHttpsPortalUrl(shopConfig.bynderBaseUrl);
+		} catch (error) {
+			if (error instanceof InvalidPortalUrlError) {
+				throw data({ error: error.message }, { status: 400 });
+			}
+			throw error;
+		}
+
 		const existingSubscription = shopConfig.webhookSubscriptions[0];
 		const isActivating = formData.get("active") === "true";
 
@@ -169,26 +186,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 					: ["asset.tagged", "media.tagged"];
 
 			if (isActivating) {
-				let bynderWebhook: {
-					id: string;
-					url: string;
-					events: string[];
-					active: boolean;
-				};
-				if (existingSubscription?.bynderWebhookId) {
-					bynderWebhook = await updateWebhookSubscription(
-						bynderClient,
-						existingSubscription.bynderWebhookId,
-						webhookUrl,
-						eventTypes
-					);
-				} else {
-					bynderWebhook = await createWebhookSubscription(
-						bynderClient,
-						webhookUrl,
-						eventTypes
-					);
-				}
+				const bynderWebhookId = existingSubscription?.bynderWebhookId;
+				const bynderWebhook = await webhookRegistrationLimiter.run(shop, () =>
+					bynderWebhookId
+						? updateWebhookSubscription(
+								bynderClient,
+								bynderWebhookId,
+								webhookUrl,
+								eventTypes
+							)
+						: createWebhookSubscription(bynderClient, webhookUrl, eventTypes)
+				);
 
 				if (existingSubscription) {
 					await prisma.webhookSubscription.update({
@@ -216,11 +224,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			} else {
 				if (existingSubscription?.active) {
 					try {
-						await deleteWebhookSubscription(
-							bynderClient,
-							existingSubscription.bynderWebhookId
+						await webhookRegistrationLimiter.run(shop, () =>
+							deleteWebhookSubscription(
+								bynderClient,
+								existingSubscription.bynderWebhookId
+							)
 						);
 					} catch (error) {
+						if (error instanceof WebhookRegistrationLimitError) {
+							throw error;
+						}
 						console.error("Failed to delete webhook from Bynder:", error);
 					}
 

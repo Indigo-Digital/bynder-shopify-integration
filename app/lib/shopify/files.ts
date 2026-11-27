@@ -7,130 +7,11 @@ import { recordApiCall } from "../metrics/collector.js";
 import type { AdminApi } from "../types.js";
 import { generateFilePath, type TemplateContext } from "./file-template.js";
 import { setBynderMetafields } from "./metafields.js";
-
-/**
- * Detect MIME type from file magic bytes (file signature)
- * This is needed when the server returns a wildcard like "image/*"
- */
-function detectMimeTypeFromBuffer(buffer: Buffer): string | null {
-	if (buffer.length < 12) return null;
-
-	// JPEG: starts with FF D8 FF
-	if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-		return "image/jpeg";
-	}
-
-	// PNG: starts with 89 50 4E 47 0D 0A 1A 0A
-	if (
-		buffer[0] === 0x89 &&
-		buffer[1] === 0x50 &&
-		buffer[2] === 0x4e &&
-		buffer[3] === 0x47 &&
-		buffer[4] === 0x0d &&
-		buffer[5] === 0x0a &&
-		buffer[6] === 0x1a &&
-		buffer[7] === 0x0a
-	) {
-		return "image/png";
-	}
-
-	// GIF: starts with GIF87a or GIF89a
-	if (
-		buffer[0] === 0x47 &&
-		buffer[1] === 0x49 &&
-		buffer[2] === 0x46 &&
-		buffer[3] === 0x38 &&
-		(buffer[4] === 0x37 || buffer[4] === 0x39) &&
-		buffer[5] === 0x61
-	) {
-		return "image/gif";
-	}
-
-	// WebP: starts with RIFF....WEBP
-	if (
-		buffer[0] === 0x52 &&
-		buffer[1] === 0x49 &&
-		buffer[2] === 0x46 &&
-		buffer[3] === 0x46 &&
-		buffer[8] === 0x57 &&
-		buffer[9] === 0x45 &&
-		buffer[10] === 0x42 &&
-		buffer[11] === 0x50
-	) {
-		return "image/webp";
-	}
-
-	// BMP: starts with BM
-	if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
-		return "image/bmp";
-	}
-
-	// TIFF: starts with II (little-endian) or MM (big-endian)
-	if (
-		(buffer[0] === 0x49 && buffer[1] === 0x49 && buffer[2] === 0x2a) ||
-		(buffer[0] === 0x4d && buffer[1] === 0x4d && buffer[2] === 0x00)
-	) {
-		return "image/tiff";
-	}
-
-	// SVG: starts with <?xml or <svg (text-based)
-	const textStart = buffer.toString("utf8", 0, Math.min(100, buffer.length));
-	if (textStart.includes("<svg") || textStart.includes("<?xml")) {
-		return "image/svg+xml";
-	}
-
-	// PDF: starts with %PDF
-	if (
-		buffer[0] === 0x25 &&
-		buffer[1] === 0x50 &&
-		buffer[2] === 0x44 &&
-		buffer[3] === 0x46
-	) {
-		return "application/pdf";
-	}
-
-	// MP4/MOV: ftyp box
-	if (
-		buffer[4] === 0x66 &&
-		buffer[5] === 0x74 &&
-		buffer[6] === 0x79 &&
-		buffer[7] === 0x70
-	) {
-		return "video/mp4";
-	}
-
-	return null;
-}
-
-/**
- * Fix wildcard MIME types (like "image/*") by detecting actual type from buffer
- */
-function fixWildcardMimeType(contentType: string, buffer: Buffer): string {
-	// Check if this is a wildcard MIME type
-	if (contentType.includes("/*")) {
-		const detectedType = detectMimeTypeFromBuffer(buffer);
-		if (detectedType) {
-			console.log(
-				`[Download] Fixed wildcard MIME type: "${contentType}" -> "${detectedType}"`
-			);
-			return detectedType;
-		}
-		// If we can't detect, default to common types based on the wildcard category
-		if (contentType.startsWith("image/")) {
-			console.log(
-				`[Download] Could not detect image type, defaulting to image/jpeg for: "${contentType}"`
-			);
-			return "image/jpeg";
-		}
-		if (contentType.startsWith("video/")) {
-			console.log(
-				`[Download] Could not detect video type, defaulting to video/mp4 for: "${contentType}"`
-			);
-			return "video/mp4";
-		}
-	}
-	return contentType;
-}
+import {
+	ensureExtensionForMimeType,
+	resolveUploadContentType,
+	UnsupportedUploadTypeError,
+} from "./upload-content-type.js";
 
 /**
  * Download file from URL and return as buffer
@@ -242,31 +123,38 @@ async function downloadFile(
 	const arrayBuffer = await response.arrayBuffer();
 	const buffer = Buffer.from(arrayBuffer);
 
-	// Fix wildcard MIME types (like "image/*") by detecting actual type
-	const fixedContentType = fixWildcardMimeType(responseContentType, buffer);
-
-	// Log download success with actual file details
 	console.log(
-		`[Download] Successfully downloaded file: ${buffer.length} bytes, Content-Type: ${fixedContentType}${fixedContentType !== responseContentType ? ` (was: ${responseContentType})` : ""}`
+		`[Download] Successfully downloaded file: ${buffer.length} bytes, Content-Type: ${responseContentType}`
 	);
 
-	return { buffer, contentType: fixedContentType };
+	return { buffer, contentType: responseContentType };
 }
 
 /**
  * Upload a buffer to Shopify Files
  * Handles staged upload creation, file upload to target (S3/GCS), and file creation in Shopify
+ *
+ * The uploaded type is detected from `buffer`; `declaredContentType` is only
+ * accepted when it agrees with the bytes.
+ *
+ * @throws {UnsupportedUploadTypeError} Before any Shopify call when the bytes
+ *   are not an allowed format or do not match `declaredContentType`
  */
 export async function uploadBufferToShopify(
 	admin: AdminApi,
-	buffer: Buffer,
-	contentType: string,
-	filename: string,
+	sourceBuffer: Buffer,
+	declaredContentType: string,
+	requestedFilename: string,
 	originalFilename: string,
 	shopId: string,
 	syncJobId?: string,
 	altText?: string
 ): Promise<{ fileId: string; fileUrl: string }> {
+	// Private copy so the bytes uploaded are exactly the bytes checked here.
+	const buffer = Buffer.from(sourceBuffer);
+	const contentType = resolveUploadContentType(buffer, declaredContentType);
+	const filename = ensureExtensionForMimeType(requestedFilename, contentType);
+
 	// Extract just the filename (without path) for staged upload
 	// Shopify's stagedUploadsCreate expects only a filename, not a path
 	const stagedUploadFilename = filename.includes("/")
@@ -276,13 +164,15 @@ export async function uploadBufferToShopify(
 	// Sanitize the filename for staged upload
 	// Shopify has restrictions on filenames - remove invalid characters
 	// Remove colons, trailing spaces, and other problematic characters
-	const sanitizedStagedFilename =
+	const sanitizedStagedFilename = ensureExtensionForMimeType(
 		stagedUploadFilename
 			.replace(/:/g, "-") // Replace colons with dashes
 			.replace(/\s+$/g, "") // Remove trailing spaces
 			.replace(/^\s+/g, "") // Remove leading spaces
 			.trim() || // Final trim
-		originalFilename; // Fallback to original if empty after sanitization
+			originalFilename, // Fallback to original if empty after sanitization
+		contentType
+	);
 
 	// Determine resource type based on content type
 	// Use IMAGE for image types, FILE for everything else
@@ -824,6 +714,15 @@ export async function uploadBynderAsset(
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		throw new Error(`Failed to download asset ${assetId}: ${errorMessage}`);
+	}
+
+	try {
+		contentType = resolveUploadContentType(buffer, contentType);
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		throw new UnsupportedUploadTypeError(
+			`Asset ${assetId} cannot be synced: ${errorMessage}`
+		);
 	}
 
 	// Generate file path using template system

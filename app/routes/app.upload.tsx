@@ -14,6 +14,10 @@ import prisma from "../db.server.js";
 import { generateAltText } from "../lib/ai/gemini-vision.js";
 import { uploadBufferToShopify } from "../lib/shopify/files.js";
 import { setFileTags } from "../lib/shopify/metafields.js";
+import {
+	resolveUploadContentType,
+	UnsupportedUploadTypeError,
+} from "../lib/shopify/upload-content-type.js";
 import { authenticate } from "../shopify.server.js";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -32,17 +36,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 	const { admin, session } = await authenticate.admin(request);
 	const formData = await request.formData();
 
-	const file = formData.get("file") as File;
+	const file = formData.get("file");
 	const folder = (formData.get("folder") as string) || "";
 	const tags = (formData.get("tags") as string) || "";
 	const useAiAltText = formData.get("useAiAltText") === "true";
 
-	if (!file) {
+	if (!file || typeof file === "string") {
 		return data({ error: "No file provided" }, { status: 400 });
 	}
 
+	const buffer = Buffer.from(await file.arrayBuffer());
+	let contentType: string;
 	try {
-		const buffer = Buffer.from(await file.arrayBuffer());
+		contentType = resolveUploadContentType(buffer, file.type);
+	} catch (error) {
+		if (error instanceof UnsupportedUploadTypeError) {
+			return data({ error: error.message }, { status: 415 });
+		}
+		throw error;
+	}
+
+	try {
 		const originalFilename = file.name;
 
 		const cleanPrefix = folder
@@ -55,11 +69,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 		// Generate AI alt text if requested
 		let altText: string | undefined;
-		if (useAiAltText && file.type.startsWith("image/")) {
+		if (useAiAltText && contentType.startsWith("image/")) {
 			try {
 				const generated = await generateAltText(
 					buffer,
-					file.type,
+					contentType,
 					originalFilename
 				);
 				if (generated) {
@@ -74,7 +88,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		const { fileId, fileUrl } = await uploadBufferToShopify(
 			admin,
 			buffer,
-			file.type,
+			contentType,
 			fullPath,
 			originalFilename,
 			session.shop,

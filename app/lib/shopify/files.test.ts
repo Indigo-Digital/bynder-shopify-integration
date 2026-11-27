@@ -17,6 +17,11 @@ vi.mock("axios", () => ({
 // Mock global fetch
 global.fetch = vi.fn();
 
+const jpegBytes = new Uint8Array([
+	0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff,
+	0xd9,
+]);
+
 describe("uploadBynderAsset", () => {
 	const mockAdmin: AdminApi = {
 		graphql: vi.fn(),
@@ -63,7 +68,7 @@ describe("uploadBynderAsset", () => {
 		// First fetch: Download from Bynder
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
-			arrayBuffer: async () => new ArrayBuffer(8),
+			arrayBuffer: async () => jpegBytes.buffer,
 			headers: {
 				get: () => "image/jpeg",
 			},
@@ -178,7 +183,7 @@ describe("uploadBynderAsset", () => {
 		// First fetch: Download from Bynder
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
-			arrayBuffer: async () => new ArrayBuffer(8),
+			arrayBuffer: async () => jpegBytes.buffer,
 			headers: {
 				get: () => "image/jpeg",
 			},
